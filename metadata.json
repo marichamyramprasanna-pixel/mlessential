@@ -1,0 +1,6 @@
+{
+  "name": "Network Anomaly Detection using DBSCAN",
+  "description": "DBSCAN-based network traffic anomaly analysis.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

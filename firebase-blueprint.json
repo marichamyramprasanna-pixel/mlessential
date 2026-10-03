@@ -1,0 +1,121 @@
+{
+  "entities": {
+    "userProfile": {
+      "title": "User Profile",
+      "description": "User profile metadata stored upon Google sign-in",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Firebase Auth UID matching request.auth.uid",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_-]+$"
+        },
+        "email": {
+          "type": "string",
+          "description": "User email address",
+          "maxLength": 256
+        },
+        "displayName": {
+          "type": "string",
+          "description": "User display name",
+          "maxLength": 128
+        },
+        "photoURL": {
+          "type": "string",
+          "description": "User avatar image URL",
+          "maxLength": 512
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Account registration timestamp in ISO 8601 or server time",
+          "maxLength": 64
+        },
+        "lastLoginAt": {
+          "type": "string",
+          "description": "Last authenticated login timestamp",
+          "maxLength": 64
+        }
+      },
+      "required": ["userId", "email"]
+    },
+    "analysisSession": {
+      "title": "Analysis Session",
+      "description": "Saved DBSCAN network anomaly detection run configuration and aggregate metrics",
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "description": "Unique session ID",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_-]+$"
+        },
+        "userId": {
+          "type": "string",
+          "description": "Owner UID",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_-]+$"
+        },
+        "title": {
+          "type": "string",
+          "description": "User-assigned or default session title",
+          "maxLength": 128
+        },
+        "datasetName": {
+          "type": "string",
+          "description": "Name of the analyzed CSV dataset",
+          "maxLength": 256
+        },
+        "totalRecords": {
+          "type": "number",
+          "description": "Total number of network flow records evaluated"
+        },
+        "numClusters": {
+          "type": "number",
+          "description": "Total number of dense clusters discovered"
+        },
+        "numAnomalies": {
+          "type": "number",
+          "description": "Number of points classified as noise (label -1)"
+        },
+        "anomalyPercentage": {
+          "type": "number",
+          "description": "Percentage of records designated as potential anomalies"
+        },
+        "eps": {
+          "type": "number",
+          "description": "DBSCAN epsilon parameter value"
+        },
+        "minSamples": {
+          "type": "number",
+          "description": "DBSCAN min_samples threshold"
+        },
+        "metric": {
+          "type": "string",
+          "description": "Distance metric utilized (euclidean, manhattan, chebyshev)",
+          "maxLength": 32
+        },
+        "selectedFeatures": {
+          "type": "array",
+          "description": "List of selected continuous network telemetry features"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Session creation timestamp",
+          "maxLength": 64
+        }
+      },
+      "required": ["sessionId", "userId", "datasetName", "totalRecords", "numClusters", "numAnomalies"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "userProfile",
+      "description": "Private user profile document accessible only to owner"
+    },
+    "/users/{userId}/sessions/{sessionId}": {
+      "schema": "analysisSession",
+      "description": "Saved DBSCAN analysis runs for the authenticated user"
+    }
+  }
+}
