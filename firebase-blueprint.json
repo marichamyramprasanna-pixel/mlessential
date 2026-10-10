@@ -26,6 +26,11 @@
           "description": "User avatar image URL",
           "maxLength": 512
         },
+        "role": {
+          "type": "string",
+          "description": "User authorization role (admin, analyst, viewer)",
+          "maxLength": 32
+        },
         "createdAt": {
           "type": "string",
           "description": "Account registration timestamp in ISO 8601 or server time",

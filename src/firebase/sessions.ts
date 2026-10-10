@@ -67,6 +67,7 @@ export async function syncUserProfile(user: {
   email: string | null;
   displayName: string | null;
   photoURL: string | null;
+  role?: string;
 }): Promise<void> {
   const path = `users/${user.uid}`;
   try {
@@ -77,6 +78,7 @@ export async function syncUserProfile(user: {
         email: user.email || "",
         displayName: user.displayName || "Analyst",
         photoURL: user.photoURL || "",
+        role: user.role || "analyst",
         lastLoginAt: new Date().toISOString(),
       },
       { merge: true }

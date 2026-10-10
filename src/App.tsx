@@ -14,6 +14,7 @@ import { ThreatIntelligenceView } from "./components/views/ThreatIntelligenceVie
 import { CloudSessionsView } from "./components/views/CloudSessionsView";
 import { GeminiChatView } from "./components/views/GeminiChatView";
 import { SettingsView } from "./components/views/SettingsView";
+import { AdminSecurityView } from "./components/views/AdminSecurityView";
 import { SettingsModal } from "./components/SettingsModal";
 import { SavedAnalysisSession } from "./firebase/sessions";
 
@@ -265,107 +266,111 @@ export default function App() {
             </div>
           )}
 
-          {currentView === "overview" && (
-            <OverviewView
-              onLoadDataset={handleLoadDataset}
-              onLoadSample={handleLoadSample}
-              hasDataset={rawRows.length > 0}
-              datasetName={datasetName}
-              totalRecords={rawRows.length}
-              onNavigate={(v) => setCurrentView(v)}
-            />
-          )}
+          <div key={currentView} className="animate-view-fade">
+            {currentView === "overview" && (
+              <OverviewView
+                onLoadDataset={handleLoadDataset}
+                onLoadSample={handleLoadSample}
+                hasDataset={rawRows.length > 0}
+                datasetName={datasetName}
+                totalRecords={rawRows.length}
+                onNavigate={(v) => setCurrentView(v)}
+              />
+            )}
 
-          {currentView === "dataset_analysis" && (
-            <DatasetAnalysisView
-              headers={headers}
-              rawRows={rawRows}
-              numericalColumns={numericalColumns}
-              selectedFeatures={selectedFeatures}
-              onToggleFeature={handleToggleFeature}
-              onSelectAllNumerical={handleSelectAllNumerical}
-              referenceColumn={referenceColumn}
-              onProceedToDetection={() => setCurrentView("detection")}
-            />
-          )}
+            {currentView === "dataset_analysis" && (
+              <DatasetAnalysisView
+                headers={headers}
+                rawRows={rawRows}
+                numericalColumns={numericalColumns}
+                selectedFeatures={selectedFeatures}
+                onToggleFeature={handleToggleFeature}
+                onSelectAllNumerical={handleSelectAllNumerical}
+                referenceColumn={referenceColumn}
+                onProceedToDetection={() => setCurrentView("detection")}
+              />
+            )}
 
-          {currentView === "detection" && (
-            <DetectionView
-              selectedFeatures={selectedFeatures}
-              rawRowCount={rawRows.length}
-              onRunDetection={handleRunDetection}
-              isProcessing={isProcessing}
-              results={results}
-              summary={cleanedDataset?.summary || null}
-              onNavigate={(v) => setCurrentView(v)}
-              onOpenSettings={() => setIsSettingsOpen(true)}
-            />
-          )}
+            {currentView === "detection" && (
+              <DetectionView
+                selectedFeatures={selectedFeatures}
+                rawRowCount={rawRows.length}
+                onRunDetection={handleRunDetection}
+                isProcessing={isProcessing}
+                results={results}
+                summary={cleanedDataset?.summary || null}
+                onNavigate={(v) => setCurrentView(v)}
+                onOpenSettings={() => setIsSettingsOpen(true)}
+              />
+            )}
 
-          {currentView === "results" && (
-            <ResultsView
-              results={results}
-              dataset={cleanedDataset}
-              datasetName={datasetName}
-              onNavigateToVisualization={() => setCurrentView("visualization")}
-              onNavigateToThreatIntel={() => setCurrentView("threat_intel")}
-              onNavigateTo3D={() => setCurrentView("three_d_model")}
-            />
-          )}
+            {currentView === "results" && (
+              <ResultsView
+                results={results}
+                dataset={cleanedDataset}
+                datasetName={datasetName}
+                onNavigateToVisualization={() => setCurrentView("visualization")}
+                onNavigateToThreatIntel={() => setCurrentView("threat_intel")}
+                onNavigateTo3D={() => setCurrentView("three_d_model")}
+              />
+            )}
 
-          {currentView === "visualization" && (
-            <VisualizationView
-              results={results}
-              pca={pcaResult}
-              dataset={cleanedDataset}
-              onNavigateTo3D={() => setCurrentView("three_d_model")}
-            />
-          )}
+            {currentView === "visualization" && (
+              <VisualizationView
+                results={results}
+                pca={pcaResult}
+                dataset={cleanedDataset}
+                onNavigateTo3D={() => setCurrentView("three_d_model")}
+              />
+            )}
 
-          {currentView === "three_d_model" && (
-            <ThreeDModelView
-              results={results}
-              pca3D={pca3DResult}
-              dataset={cleanedDataset}
-              onRunSampleDemo={handleRunSampleDemo}
-              onNavigateToSettings={() => setIsSettingsOpen(true)}
-            />
-          )}
+            {currentView === "three_d_model" && (
+              <ThreeDModelView
+                results={results}
+                pca3D={pca3DResult}
+                dataset={cleanedDataset}
+                onRunSampleDemo={handleRunSampleDemo}
+                onNavigateToSettings={() => setIsSettingsOpen(true)}
+              />
+            )}
 
-          {currentView === "threat_intel" && (
-            <ThreatIntelligenceView
-              results={results}
-              dataset={cleanedDataset}
-            />
-          )}
+            {currentView === "threat_intel" && (
+              <ThreatIntelligenceView
+                results={results}
+                dataset={cleanedDataset}
+              />
+            )}
 
-          {currentView === "cloud_sessions" && (
-            <CloudSessionsView
-              onLoadSessionParameters={(session: SavedAnalysisSession) => {
-                // Preselect features if present in loaded dataset
-                if (session.selectedFeatures && session.selectedFeatures.length >= 2) {
-                  setSelectedFeatures(session.selectedFeatures);
-                }
-                setCurrentView("detection");
-              }}
-            />
-          )}
+            {currentView === "cloud_sessions" && (
+              <CloudSessionsView
+                onLoadSessionParameters={(session: SavedAnalysisSession) => {
+                  // Preselect features if present in loaded dataset
+                  if (session.selectedFeatures && session.selectedFeatures.length >= 2) {
+                    setSelectedFeatures(session.selectedFeatures);
+                  }
+                  setCurrentView("detection");
+                }}
+              />
+            )}
 
-          {currentView === "gemini_chat" && (
-            <GeminiChatView
-              results={results}
-              dataset={cleanedDataset}
-              datasetName={datasetName}
-            />
-          )}
+            {currentView === "gemini_chat" && (
+              <GeminiChatView
+                results={results}
+                dataset={cleanedDataset}
+                datasetName={datasetName}
+              />
+            )}
 
-          {currentView === "settings" && <SettingsView />}
+            {currentView === "admin_security" && <AdminSecurityView />}
 
-          {currentView === "about" && <AboutView />}
+            {currentView === "settings" && <SettingsView />}
 
-          {currentView === "privacy_policy" && <PrivacyPolicyView />}
+            {currentView === "about" && <AboutView />}
 
-          {currentView === "terms" && <TermsView />}
+            {currentView === "privacy_policy" && <PrivacyPolicyView />}
+
+            {currentView === "terms" && <TermsView />}
+          </div>
         </main>
       </div>
 

@@ -1,6 +1,5 @@
 import express, { Request, Response, NextFunction } from "express";
 import { createServer as createViteServer } from "vite";
-import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
 import path from "path";
 import fs from "fs";
@@ -8,10 +7,30 @@ import { fileURLToPath } from "url";
 import { stripDangerousTags, validateStringLength } from "./src/utils/sanitizer.js";
 import { scanTextForSecrets } from "./src/utils/secretScanner.js";
 
-dotenv.config();
+// Load environment variables with override to ensure local .env keys are preferred
+dotenv.config({ override: true });
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// Helper to reliably get the configured OpenRouter API key
+function getOpenRouterApiKey(): string {
+  const envKey = process.env.OPENROUTER_API_KEY;
+  if (envKey && envKey.startsWith("sk-or-")) {
+    return envKey;
+  }
+  try {
+    const envPath = path.resolve(__dirname, ".env");
+    if (fs.existsSync(envPath)) {
+      const content = fs.readFileSync(envPath, "utf-8");
+      const match = content.match(/OPENROUTER_API_KEY\s*=\s*["']?(sk-or-[^"'\s\n]+)["']?/);
+      if (match && match[1]) {
+        return match[1];
+      }
+    }
+  } catch {}
+  return envKey || "";
+}
 
 // =====================================================================
 // 1. ENVIRONMENT VALIDATION & AUDITING (Check env variables, debug mode off)
@@ -20,7 +39,6 @@ interface EnvAuditReport {
   timestamp: string;
   nodeEnv: string;
   port: number;
-  hasGeminiKey: boolean;
   hasOpenRouterKey: boolean;
   hasAppUrl: boolean;
   debugMode: boolean;
@@ -42,17 +60,17 @@ function validateEnvironment(): EnvAuditReport {
     }
   }
 
-  const hasGeminiKey = Boolean(process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY.length > 5);
-  const hasOpenRouterKey = Boolean(process.env.OPENROUTER_API_KEY && process.env.OPENROUTER_API_KEY.startsWith("sk-or-v1-"));
+  const activeKey = getOpenRouterApiKey();
+  const hasOpenRouterKey = Boolean(activeKey && activeKey.startsWith("sk-or-"));
   const hasAppUrl = Boolean(process.env.APP_URL && process.env.APP_URL.startsWith("http"));
 
-  if (!hasGeminiKey && !hasOpenRouterKey) {
-    warnings.push("Neither GEMINI_API_KEY nor OPENROUTER_API_KEY is configured. AI endpoints will be unavailable.");
+  if (!hasOpenRouterKey) {
+    warnings.push("OPENROUTER_API_KEY is not configured or invalid. AI endpoints will be unavailable.");
   }
 
   // Non-sensitive logging (Never log API keys)
   console.log(`[Security Audit] Environment initialized: NODE_ENV=${nodeEnv}, DebugMode=${debugMode}`);
-  console.log(`[Security Audit] AI Providers: Gemini=${hasGeminiKey}, OpenRouter=${hasOpenRouterKey}`);
+  console.log(`[Security Audit] AI Engine: OpenRouter (Active & Sole Provider: ${hasOpenRouterKey ? "Configured" : "Missing"})`);
   if (warnings.length > 0) {
     warnings.forEach((w) => console.warn(`[Security Warning] ${w}`));
   }
@@ -61,7 +79,6 @@ function validateEnvironment(): EnvAuditReport {
     timestamp: new Date().toISOString(),
     nodeEnv,
     port,
-    hasGeminiKey,
     hasOpenRouterKey,
     hasAppUrl,
     debugMode,
@@ -161,7 +178,6 @@ function sanitizeErrorMessage(rawMessage: any): string {
   if (typeof rawMessage !== "string") return "An unexpected error occurred.";
   return rawMessage
     .replace(/sk-or-v1-[a-zA-Z0-9]{32,}/g, "[REDACTED_OPENROUTER_KEY]")
-    .replace(/AIza[0-9A-Za-z-_]{35}/g, "[REDACTED_GEMINI_KEY]")
     .replace(/Bearer\s+[a-zA-Z0-9_\-\.]+/gi, "Bearer [REDACTED_TOKEN]")
     .replace(/\/app\/[a-zA-Z0-9_\-\/]+/g, "[INTERNAL_PATH]");
 }
@@ -176,9 +192,9 @@ async function startServer() {
   app.disable("x-powered-by");
 
   // B. Security Headers Middleware (CSP, HSTS, XSS protection, anti-sniff)
+  // Configured to allow AI Studio preview iframe embedding
   app.use((req, res, next) => {
     res.setHeader("X-Content-Type-Options", "nosniff");
-    res.setHeader("X-Frame-Options", "SAMEORIGIN");
     res.setHeader("X-XSS-Protection", "1; mode=block");
     res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
     res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=()");
@@ -187,15 +203,16 @@ async function startServer() {
       res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
     }
 
-    // Content Security Policy
+    // Content Security Policy allowing AI Studio preview iframe and Vite module scripts
     res.setHeader(
       "Content-Security-Policy",
-      "default-src 'self'; " +
-        "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://apis.google.com https://*.firebaseapp.com; " +
-        "connect-src 'self' https://* wss://*; " +
+      "default-src 'self' https: data: blob:; " +
+        "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://apis.google.com https://*.firebaseapp.com https://*.googleapis.com https://*.google.com blob:; " +
+        "connect-src 'self' https://* wss://* ws://* http://localhost:* ws://localhost:*; " +
         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
         "font-src 'self' https://fonts.gstatic.com data:; " +
         "img-src 'self' data: https://* blob:; " +
+        "frame-ancestors 'self' https://*.google.com https://*.google.dev https://*.run.app https://*.googleusercontent.com http://localhost:* http://127.0.0.1:*; " +
         "object-src 'none'; " +
         "base-uri 'self';"
     );
@@ -229,7 +246,7 @@ async function startServer() {
     next();
   });
 
-  // D. Protected File & Source Code Guard (Check Exposed Files, Hide Python Source & API Keys)
+  // D. Protected File & Source Code Guard (Check Exposed Files, Hide Python Source & Sensitive Configs)
   app.use((req, res, next) => {
     const url = req.path.toLowerCase();
 
@@ -239,7 +256,7 @@ async function startServer() {
       return res.status(403).json({ error: "Access Denied: Path traversal detected." });
     }
 
-    // Explicitly block any direct HTTP access to Python source, env files, keys, and lockfiles
+    // Explicitly block sensitive backend files, keys, envs, and legacy python files
     const forbiddenExtensions = [
       ".py",
       ".env",
@@ -249,9 +266,6 @@ async function startServer() {
       ".lock",
       ".key",
       ".pem",
-      ".ts",
-      ".config.ts",
-      ".config.js",
       "package.json",
       "tsconfig.json",
     ];
@@ -260,7 +274,8 @@ async function startServer() {
       forbiddenExtensions.some((ext) => url.endsWith(ext) || url.includes(`/${ext}`) || url.includes(ext + "/")) ||
       url.startsWith("/pages/") ||
       url === "/app.py" ||
-      url === "/server.ts";
+      url === "/server.ts" ||
+      url === "/vite.config.ts";
 
     if (isBlocked) {
       console.warn(`[Security Alert] Blocked unauthorized file access attempt: ${req.path}`);
@@ -285,7 +300,6 @@ async function startServer() {
     const authHeader = req.headers.authorization;
     const adminKeyHeader = req.headers["x-admin-key"];
 
-    // Check for Bearer token or Admin Key header
     const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
     const isAuthorized =
       (adminKeyHeader && adminKeyHeader === ADMIN_SESSION_SECRET) ||
@@ -304,16 +318,13 @@ async function startServer() {
   // F. Apply General API Rate Limiting to all /api routes
   app.use("/api", generalApiLimiter);
 
-  // Initialize Gemini client
-  const ai = new GoogleGenAI();
-
   // Helper: OpenRouter API invocation with model cascade
   async function callOpenRouter(
     messages: Array<{ role: string; content: string }>,
     systemPrompt?: string,
     preferredModel?: string
   ): Promise<{ content: string; model: string }> {
-    const apiKey = process.env.OPENROUTER_API_KEY;
+    const apiKey = getOpenRouterApiKey();
     if (!apiKey) {
       throw new Error("OPENROUTER_API_KEY is not configured.");
     }
@@ -331,11 +342,9 @@ async function startServer() {
 
     const candidateModels = [
       preferredModel,
-      "nvidia/nemotron-3.5-lightning:free",
-      "meta-llama/llama-3.3-70b-instruct:free",
-      "google/gemini-2.0-flash-exp:free",
-      "qwen/qwen3.8-27b:free",
-      "mistralai/mistral-7b-instruct:free",
+      "meta-llama/llama-3.3-70b-instruct",
+      "meta-llama/llama-3.1-8b-instruct",
+      "qwen/qwen-2.5-72b-instruct",
     ].filter(Boolean) as string[];
 
     let lastError: any = null;
@@ -380,107 +389,74 @@ async function startServer() {
   }
 
   // ===================================================================
-  // 6. SECURED ENDPOINTS: THREAT INTELLIGENCE & CHAT
+  // 6. SECURED ENDPOINTS: THREAT INTELLIGENCE & CHAT (POWERED BY OPENROUTER)
   // ===================================================================
 
   // Threat Intelligence Endpoint
   app.post("/api/threat-intelligence", aiInferenceLimiter, async (req, res) => {
     try {
-      // Content-Type enforcement
       if (!req.is("application/json")) {
         return res.status(415).json({ success: false, error: "Content-Type must be application/json" });
       }
 
       const { query, detectedLabel, featureSummary, anomalyRate } = req.body;
 
-      // Sanitize inputs
       const sanitizedQuery = validateStringLength(stripDangerousTags(query || "latest network traffic anomalies"), 256, "Query");
       const sanitizedLabel = validateStringLength(stripDangerousTags(detectedLabel || "Unsupervised DBSCAN Noise Point"), 128, "Label");
       const sanitizedFeatures = validateStringLength(stripDangerousTags(featureSummary || "Deviations in Flow Duration, Packet Rate"), 512, "Features");
       const safeAnomalyRate = typeof anomalyRate === "number" ? Math.min(100, Math.max(0, anomalyRate)).toFixed(1) : "N/A";
 
       const prompt = `You are a Senior Network Security & Threat Intelligence Analyst.
-Analyze the following anomalous network telemetry and provide recent threat intelligence grounded in real-world data from Google Search:
+Analyze the following anomalous network telemetry and provide recent threat intelligence analysis:
 
 - Specific Query/Focus: ${sanitizedQuery}
 - Identified Reference or Traffic Tag: ${sanitizedLabel}
 - Observed Telemetry Indicators: ${sanitizedFeatures}
 - Detected Anomaly Rate: ${safeAnomalyRate}%
 
-Using live Google Search data, provide:
+Provide a comprehensive, factual analysis structured into:
 1. Real-World Correlated Threat Campaigns & Known Attack Signatures (e.g. active botnet scans, DDoS flood tools, zero-day CVE probes, credential spraying).
-2. Protocol & Port Triage: Common ports and service behaviors exhibiting these flow profiles.
-3. MITRE ATT&CK Mapping: Specific tactics and techniques (e.g. T1046 Network Service Discovery, T1498 Network Denial of Service).
-4. Recommended Immediate Defense & Mitigation Controls (firewall rules, Suricata/Snort signatures, rate-limiting).
+2. Protocol & Port Triage: Common ports, services, and protocol behaviors exhibiting these specific flow telemetry profiles.
+3. MITRE ATT&CK Mapping: Specific tactics and techniques (e.g. T1046 Network Service Discovery, T1498 Network Denial of Service, T1071 Application Layer Protocol).
+4. Recommended Immediate Defense & Mitigation Controls (firewall rules, Suricata/Snort signatures, rate-limiting, and isolation policies).
 
-Keep your response factual, technical, and grounded with citations.`;
+Keep your response factual, technical, and objective.`;
 
-      let responseText = "";
-      let searchQueries: string[] = [];
-      let sources: Array<{ title: string; uri: string }> = [];
-
-      try {
-        const response = await ai.models.generateContent({
-          model: "gemini-3.5-flash",
-          contents: prompt,
-          config: {
-            tools: [{ googleSearch: {} }],
-          },
-        });
-
-        responseText = response.text || "No intelligence analysis generated.";
-        const candidate = response.candidates?.[0];
-        const groundingMetadata = candidate?.groundingMetadata || null;
-
-        searchQueries = groundingMetadata?.webSearchQueries || [];
-        sources =
-          groundingMetadata?.groundingChunks?.map((chunk: any) => ({
-            title: stripDangerousTags(chunk.web?.title || "Search Source"),
-            uri: encodeURI(chunk.web?.uri || ""),
-          })) || [];
-      } catch (geminiErr: any) {
-        console.warn("Gemini threat intel fallback to OpenRouter:", geminiErr?.message);
-        if (process.env.OPENROUTER_API_KEY) {
-          const openRouterRes = await callOpenRouter(
-            [{ role: "user", content: prompt }],
-            "You are an expert Cyber Threat Intelligence Analyst."
-          );
-          responseText = openRouterRes.content;
-          searchQueries = [sanitizedQuery];
-          sources = [
-            {
-              title: `OpenRouter Threat Intelligence Engine (${openRouterRes.model})`,
-              uri: "https://openrouter.ai",
-            },
-          ];
-        } else {
-          throw geminiErr;
-        }
-      }
+      const openRouterRes = await callOpenRouter(
+        [{ role: "user", content: prompt }],
+        "You are an expert Cyber Threat Intelligence Analyst specializing in network telemetry.",
+        "meta-llama/llama-3.3-70b-instruct"
+      );
 
       res.json({
         success: true,
-        analysis: responseText,
-        searchQueries,
-        sources,
+        analysis: openRouterRes.content,
+        searchQueries: [sanitizedQuery],
+        sources: [
+          {
+            title: `OpenRouter Threat Intelligence (${openRouterRes.model})`,
+            uri: "https://openrouter.ai",
+          },
+        ],
+        model: openRouterRes.model,
       });
     } catch (error: any) {
       console.error("Threat intelligence error:", sanitizeErrorMessage(error?.message));
       res.status(500).json({
         success: false,
-        error: sanitizeErrorMessage(error?.message || "Failed to retrieve threat intelligence."),
+        error: sanitizeErrorMessage(error?.message || "Failed to retrieve threat intelligence from OpenRouter."),
       });
     }
   });
 
-  // AI Chatbot Endpoint
+  // AI Chatbot Endpoint (Solely Powered by OpenRouter)
   app.post("/api/chat", aiInferenceLimiter, async (req, res) => {
     try {
       if (!req.is("application/json")) {
         return res.status(415).json({ success: false, error: "Content-Type must be application/json" });
       }
 
-      const { messages = [], role = "analyst", taskType = "general", provider, detectionContext } = req.body;
+      const { messages = [], role = "analyst", taskType = "general", detectionContext } = req.body;
 
       if (!Array.isArray(messages) || messages.length === 0) {
         return res.status(400).json({ success: false, error: "Messages array cannot be empty." });
@@ -496,11 +472,12 @@ Keep your response factual, technical, and grounded with citations.`;
         ? validateStringLength(stripDangerousTags(String(detectionContext)), 4096, "Detection Context")
         : "";
 
-      let selectedModel = "gemini-3.5-flash";
-      if (taskType === "complex" || role === "threat_complex") {
-        selectedModel = "gemini-3.1-pro-preview";
-      } else if (taskType === "fast" || role === "telemetry_fast") {
-        selectedModel = "gemini-3.1-flash-lite";
+      // Select OpenRouter model based on role and complexity
+      let preferredModel = "meta-llama/llama-3.3-70b-instruct";
+      if (taskType === "fast" || role === "telemetry_fast") {
+        preferredModel = "meta-llama/llama-3.1-8b-instruct";
+      } else if (taskType === "complex" || role === "threat_complex") {
+        preferredModel = "meta-llama/llama-3.3-70b-instruct";
       }
 
       let systemPrompt =
@@ -510,69 +487,29 @@ Keep your response factual, technical, and grounded with citations.`;
         systemPrompt += `\n\nActive Context:\n${sanitizedContext}`;
       }
 
-      if (provider === "openrouter" && process.env.OPENROUTER_API_KEY) {
-        const orRes = await callOpenRouter(sanitizedMessages, systemPrompt);
-        return res.json({
-          success: true,
-          message: {
-            role: "assistant",
-            content: orRes.content,
-            timestamp: new Date().toISOString(),
-            model: orRes.model,
-          },
-        });
-      }
-
-      const formattedContents = sanitizedMessages.map((m: any) => ({
-        role: m.role === "assistant" ? "model" : "user",
-        parts: [{ text: m.content }],
-      }));
-
-      let response;
-      try {
-        response = await ai.models.generateContent({
-          model: selectedModel,
-          contents: formattedContents,
-          config: {
-            systemInstruction: systemPrompt,
-          },
-        });
-      } catch (geminiErr: any) {
-        if (process.env.OPENROUTER_API_KEY) {
-          const orRes = await callOpenRouter(sanitizedMessages, systemPrompt);
-          return res.json({
-            success: true,
-            message: {
-              role: "assistant",
-              content: orRes.content,
-              timestamp: new Date().toISOString(),
-              model: orRes.model,
-            },
-          });
-        }
-        throw geminiErr;
-      }
+      const orRes = await callOpenRouter(sanitizedMessages, systemPrompt, preferredModel);
 
       res.json({
         success: true,
         message: {
           role: "assistant",
-          content: response.text || "No response received.",
+          content: orRes.content,
           timestamp: new Date().toISOString(),
-          model: selectedModel,
+          model: orRes.model,
         },
       });
     } catch (error: any) {
       console.error("Chat error:", sanitizeErrorMessage(error?.message));
       res.status(500).json({
         success: false,
-        error: sanitizeErrorMessage(error?.message || "Failed to process chat response."),
+        error: sanitizeErrorMessage(error?.message || "Failed to process chat response via OpenRouter."),
       });
     }
   });
 
-  // Health Check Endpoint (Non-sensitive status)
+  // Health Check Endpoint (OpenRouter as Sole AI Provider)
   app.get("/api/health", (_req, res) => {
+    const hasKey = Boolean(getOpenRouterApiKey());
     res.json({
       status: "healthy",
       timestamp: new Date().toISOString(),
@@ -584,8 +521,7 @@ Keep your response factual, technical, and grounded with citations.`;
         debugMode: false,
       },
       providers: {
-        gemini: Boolean(process.env.GEMINI_API_KEY),
-        openrouter: Boolean(process.env.OPENROUTER_API_KEY),
+        openrouter: hasKey,
       },
     });
   });
@@ -596,6 +532,7 @@ Keep your response factual, technical, and grounded with citations.`;
 
   // Admin Security Status Audit
   app.get("/api/admin/security/status", adminActionLimiter, requireAdminAuth, (_req, res) => {
+    const hasKey = Boolean(getOpenRouterApiKey());
     res.json({
       success: true,
       auditTimestamp: new Date().toISOString(),
@@ -623,8 +560,7 @@ Keep your response factual, technical, and grounded with citations.`;
         port: envAudit.port,
         debugMode: false,
         activeProviders: {
-          gemini: envAudit.hasGeminiKey,
-          openrouter: envAudit.hasOpenRouterKey,
+          openrouter: hasKey,
         },
       },
     });

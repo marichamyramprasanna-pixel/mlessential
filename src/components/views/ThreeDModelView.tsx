@@ -6,10 +6,6 @@ import {
   RotateCw,
   Maximize2,
   Minimize2,
-  ZoomIn,
-  ZoomOut,
-  Eye,
-  Sliders,
   Play,
   Pause,
   Layers,
@@ -17,17 +13,15 @@ import {
   Server,
   Network,
   RefreshCw,
-  Info,
   Radio,
   Activity,
   CheckCircle2,
   AlertTriangle,
-  ArrowRight,
-  Database,
   Cpu,
-  Sparkles,
   Compass,
   Video,
+  Eye,
+  AlertCircle,
 } from "lucide-react";
 import { DBSCANResults } from "../../ml/dbscan";
 import { PCA3DResult } from "../../ml/pca";
@@ -78,6 +72,10 @@ export const ThreeDModelView: React.FC<ThreeDModelViewProps> = ({
   const [isCinematicOrbit, setIsCinematicOrbit] = useState<boolean>(false);
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
   const [filterMode, setFilterMode] = useState<number | "all" | "anomalies_only">("all");
+
+  // WebGL Context Error / Fallback State
+  const [webglError, setWebglError] = useState<string | null>(null);
+  const [retryKey, setRetryKey] = useState<number>(0);
 
   // Interaction States
   const [hoveredPointIdx, setHoveredPointIdx] = useState<number | null>(null);
@@ -184,10 +182,13 @@ export const ThreeDModelView: React.FC<ThreeDModelViewProps> = ({
     });
   }, [normalizedPoints, results]);
 
-  // Main Three.js Scene Setup & Loop
+  // Main Three.js Scene Setup & Loop (Wrapped in WebGL safety & error isolation)
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
+
+    // Reset previous error state for retry
+    setWebglError(null);
 
     const width = container.clientWidth || 800;
     const height = container.clientHeight || 580;
@@ -196,7 +197,6 @@ export const ThreeDModelView: React.FC<ThreeDModelViewProps> = ({
     const scene = new THREE.Scene();
     sceneRef.current = scene;
 
-    // Theme color palettes
     const bgColor = visualTheme === "obsidian_matrix"
       ? 0x040d0a
       : visualTheme === "quantum_holo"
@@ -211,15 +211,42 @@ export const ThreeDModelView: React.FC<ThreeDModelViewProps> = ({
     camera.position.set(19, 15, 23);
     cameraRef.current = camera;
 
-    // 3. Renderer with ACES Tone Mapping
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: "high-performance" });
-    renderer.setSize(width, height);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.15;
-    rendererRef.current = renderer;
-    container.innerHTML = "";
-    container.appendChild(renderer.domElement);
+    // 3. Renderer with WebGL Context Safety (Prevents unhandled runtime crashes)
+    let renderer: THREE.WebGLRenderer;
+    try {
+      renderer = new THREE.WebGLRenderer({
+        antialias: true,
+        alpha: true,
+        powerPreference: "default",
+        failIfMajorPerformanceCaveat: false,
+      });
+      renderer.setSize(width, height);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.75));
+      renderer.toneMapping = THREE.ACESFilmicToneMapping;
+      renderer.toneMappingExposure = 1.15;
+      rendererRef.current = renderer;
+      container.innerHTML = "";
+      container.appendChild(renderer.domElement);
+    } catch (err: any) {
+      console.warn("[ThreeDModelView] WebGL creation failed:", err?.message);
+      setWebglError(err?.message || "WebGL context disabled or unsupported in browser sandbox.");
+      return;
+    }
+
+    // Attach Context Loss/Restore Listeners
+    const handleContextLost = (e: Event) => {
+      e.preventDefault();
+      console.warn("[ThreeDModelView] WebGL context lost.");
+      setWebglError("WebGL context was interrupted. Click below to retry.");
+    };
+
+    const handleContextRestored = () => {
+      console.log("[ThreeDModelView] WebGL context restored.");
+      setWebglError(null);
+    };
+
+    renderer.domElement.addEventListener("webglcontextlost", handleContextLost);
+    renderer.domElement.addEventListener("webglcontextrestored", handleContextRestored);
 
     // 4. OrbitControls
     const controls = new OrbitControls(camera, renderer.domElement);
@@ -235,36 +262,21 @@ export const ThreeDModelView: React.FC<ThreeDModelViewProps> = ({
     const ambientLight = new THREE.AmbientLight(0xffffff, 1.0);
     scene.add(ambientLight);
 
-    // Key Light (Crisp Cool White with warm specular)
     const keyLight = new THREE.DirectionalLight(0xf0fdf4, 2.4);
     keyLight.position.set(22, 32, 22);
     scene.add(keyLight);
 
-    // Fill Light (Electric Indigo / Violet)
     const fillLight = new THREE.DirectionalLight(0x818cf8, 1.5);
     fillLight.position.set(-22, -12, -20);
     scene.add(fillLight);
 
-    // Rim Light (Cyan Highlight from behind)
     const rimLight = new THREE.DirectionalLight(0x38bdf8, 2.0);
     rimLight.position.set(0, -25, -28);
     scene.add(rimLight);
 
-    // Dynamic Central Point Glow
-    const centerPointLight = new THREE.PointLight(0x38bdf8, 1.8, 45);
-    centerPointLight.position.set(0, 2, 0);
-    scene.add(centerPointLight);
-
-    // Alert Beacon Point Light
-    const alertPointLight = new THREE.PointLight(0xef4444, 2.0, 35);
-    alertPointLight.position.set(0, 0, 0);
-    scene.add(alertPointLight);
-
-    // Animated Dynamic Objects Store
     const dynamicObjects: {
       anomalies: THREE.Mesh[];
       anomalyRings: THREE.Mesh[];
-      beacons: THREE.Mesh[];
       radarRings: THREE.Mesh[];
       fans: THREE.Mesh[];
       radioWaves: THREE.Mesh[];
@@ -280,7 +292,6 @@ export const ThreeDModelView: React.FC<ThreeDModelViewProps> = ({
     } = {
       anomalies: [],
       anomalyRings: [],
-      beacons: [],
       radarRings: [],
       fans: [],
       radioWaves: [],
@@ -289,7 +300,7 @@ export const ThreeDModelView: React.FC<ThreeDModelViewProps> = ({
       rotators: [],
     };
 
-    // A. Cosmic Starfield / Cyber Dust Particles
+    // Cosmic Dust Starfield
     if (showStarfield) {
       const starCount = 1200;
       const starGeo = new THREE.BufferGeometry();
@@ -323,7 +334,7 @@ export const ThreeDModelView: React.FC<ThreeDModelViewProps> = ({
       dynamicObjects.rotators.push({ obj: starField, speed: 0.0003, axis: "y" });
     }
 
-    // B. Holographic Target Reticle for Hovered/Selected Point
+    // Reticle
     const reticleGroup = new THREE.Group();
     reticleGroup.visible = false;
     const reticleRingGeo = new THREE.RingGeometry(0.55 * pointScale, 0.65 * pointScale, 32);
@@ -336,7 +347,6 @@ export const ThreeDModelView: React.FC<ThreeDModelViewProps> = ({
     const reticleRing = new THREE.Mesh(reticleRingGeo, reticleRingMat);
     reticleGroup.add(reticleRing);
 
-    // 4 Corner Brackets for Reticle
     for (let b = 0; b < 4; b++) {
       const angle = (b * Math.PI) / 2 + Math.PI / 4;
       const bracketGeo = new THREE.BoxGeometry(0.3, 0.05, 0.05);
@@ -349,22 +359,13 @@ export const ThreeDModelView: React.FC<ThreeDModelViewProps> = ({
     scene.add(reticleGroup);
     targetReticleRef.current = reticleGroup;
 
-    // -----------------------------------------------------------------
-    // BUILD SCENE ACCORDING TO ACTIVE MODEL MODE
-    // -----------------------------------------------------------------
+    // Build Scene Geometry
     if (modelMode === "cluster_space") {
-      // -------------------------------------------------------------
-      // MODE 1: CLUSTER SPACE 3D MODEL (PCA 3D Feature Space)
-      // -------------------------------------------------------------
-
-      // 1. Dual Holographic Cyber Ground Grid
       if (showGrid) {
-        // Inner Fine Grid
         const gridFine = new THREE.GridHelper(26, 26, 0x0284c7, 0x1e293b);
         gridFine.position.y = -8;
         scene.add(gridFine);
 
-        // Outer Hex/Radial Radar Sweep Ring
         const radarGeo = new THREE.RingGeometry(11, 11.25, 48);
         const radarMat = new THREE.MeshBasicMaterial({
           color: 0x0284c7,
@@ -379,62 +380,24 @@ export const ThreeDModelView: React.FC<ThreeDModelViewProps> = ({
         dynamicObjects.radarRings.push(radarRing);
       }
 
-      // 2. 3D Coordinate Reference Axes with Glowing Arrow Heads
+      // Coordinate axes
       const axisLen = 10;
-      // PC1 (X - Red)
-      const arrowX = new THREE.ArrowHelper(
-        new THREE.Vector3(1, 0, 0),
-        new THREE.Vector3(0, 0, 0),
-        axisLen,
-        0xef4444,
-        1.0,
-        0.5
-      );
-      scene.add(arrowX);
+      scene.add(new THREE.ArrowHelper(new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 0, 0), axisLen, 0xef4444, 1.0, 0.5));
+      scene.add(new THREE.ArrowHelper(new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, 0), axisLen, 0x10b981, 1.0, 0.5));
+      scene.add(new THREE.ArrowHelper(new THREE.Vector3(0, 0, 1), new THREE.Vector3(0, 0, 0), axisLen, 0x38bdf8, 1.0, 0.5));
 
-      // PC2 (Y - Green)
-      const arrowY = new THREE.ArrowHelper(
-        new THREE.Vector3(0, 1, 0),
-        new THREE.Vector3(0, 0, 0),
-        axisLen,
-        0x10b981,
-        1.0,
-        0.5
-      );
-      scene.add(arrowY);
-
-      // PC3 (Z - Blue)
-      const arrowZ = new THREE.ArrowHelper(
-        new THREE.Vector3(0, 0, 1),
-        new THREE.Vector3(0, 0, 0),
-        axisLen,
-        0x38bdf8,
-        1.0,
-        0.5
-      );
-      scene.add(arrowZ);
-
-      // 3. Coordinate Box Cage
       if (showWireframeBox) {
         const boxGeo = new THREE.BoxGeometry(16, 16, 16);
         const boxEdges = new THREE.EdgesGeometry(boxGeo);
-        const boxMat = new THREE.LineBasicMaterial({
-          color: 0x334155,
-          transparent: true,
-          opacity: 0.5,
-        });
-        const wireframeBox = new THREE.LineSegments(boxEdges, boxMat);
-        scene.add(wireframeBox);
+        const boxMat = new THREE.LineBasicMaterial({ color: 0x334155, transparent: true, opacity: 0.5 });
+        scene.add(new THREE.LineSegments(boxEdges, boxMat));
       }
 
-      // 4. Cluster Hulls, Centroids & Holographic Beacons
       clusterCentroids.forEach((c) => {
         if (filterMode !== "all" && filterMode !== c.label) return;
 
-        // A. Translucent Forcefield Bubble Shell
         if (showClusterHulls) {
           const hullGeo = new THREE.IcosahedronGeometry(c.radius, 2);
-          // Wireframe outer cage
           const wireMat = new THREE.MeshBasicMaterial({
             color: new THREE.Color(c.color),
             wireframe: true,
@@ -446,7 +409,6 @@ export const ThreeDModelView: React.FC<ThreeDModelViewProps> = ({
           scene.add(wireMesh);
           dynamicObjects.rotators.push({ obj: wireMesh, speed: 0.002, axis: "y" });
 
-          // Inner soft glowing forcefield volume
           const fillMat = new THREE.MeshStandardMaterial({
             color: new THREE.Color(c.color),
             transparent: true,
@@ -459,7 +421,6 @@ export const ThreeDModelView: React.FC<ThreeDModelViewProps> = ({
           scene.add(fillMesh);
         }
 
-        // B. Holographic Vertical Light Beam Pillar from Floor to Centroid
         if (showBeaconBeams) {
           const beamHeight = c.y - (-8);
           if (beamHeight > 0) {
@@ -476,7 +437,6 @@ export const ThreeDModelView: React.FC<ThreeDModelViewProps> = ({
           }
         }
 
-        // C. Centroid Core Floating Diamond Beacon
         const centerGeo = new THREE.OctahedronGeometry(0.45, 0);
         const centerMat = new THREE.MeshPhysicalMaterial({
           color: new THREE.Color(c.color),
@@ -490,24 +450,10 @@ export const ThreeDModelView: React.FC<ThreeDModelViewProps> = ({
         centerMesh.position.set(c.x, c.y, c.z);
         scene.add(centerMesh);
         dynamicObjects.rotators.push({ obj: centerMesh, speed: 0.02, axis: "y" });
-        dynamicObjects.rotators.push({ obj: centerMesh, speed: 0.015, axis: "x" });
-
-        // Outer Beacon Ring
-        const ringGeo = new THREE.TorusGeometry(0.75, 0.04, 12, 32);
-        const ringMat = new THREE.MeshBasicMaterial({
-          color: new THREE.Color(c.color),
-          transparent: true,
-          opacity: 0.7,
-        });
-        const ring = new THREE.Mesh(ringGeo, ringMat);
-        ring.position.set(c.x, c.y, c.z);
-        ring.rotation.x = Math.PI / 3;
-        scene.add(ring);
-        dynamicObjects.rotators.push({ obj: ring, speed: 0.025, axis: "z" });
       });
 
-      // 5. Data Points: Glassy Crystal Spheres & Pulsing Anomaly Rubies
-      const sphereGeo = new THREE.SphereGeometry(0.18 * pointScale, 20, 20);
+      // Data Points
+      const sphereGeo = new THREE.SphereGeometry(0.18 * pointScale, 16, 16);
       const octaGeo = new THREE.OctahedronGeometry(0.28 * pointScale, 0);
 
       normalizedPoints.forEach((p) => {
@@ -515,7 +461,6 @@ export const ThreeDModelView: React.FC<ThreeDModelViewProps> = ({
         if (typeof filterMode === "number" && p.label !== filterMode) return;
 
         if (p.isNoise) {
-          // Anomaly Point: Glowing Red Ruby Crystal + Dual Hazard Halos
           const mat = new THREE.MeshStandardMaterial({
             color: 0xef4444,
             emissive: 0xef4444,
@@ -529,21 +474,7 @@ export const ThreeDModelView: React.FC<ThreeDModelViewProps> = ({
           scene.add(mesh);
           dynamicObjects.anomalies.push(mesh);
 
-          // Outer Spinning Hazard Wireframe Cage
-          const cageGeo = new THREE.IcosahedronGeometry(0.42 * pointScale, 0);
-          const cageMat = new THREE.MeshBasicMaterial({
-            color: 0xff3b30,
-            wireframe: true,
-            transparent: true,
-            opacity: 0.85,
-          });
-          const cageMesh = new THREE.Mesh(cageGeo, cageMat);
-          cageMesh.position.set(p.x, p.y, p.z);
-          scene.add(cageMesh);
-          dynamicObjects.rotators.push({ obj: cageMesh, speed: 0.03, axis: "y" });
-
-          // Pulsing Anomaly Halo Ring
-          const haloGeo = new THREE.RingGeometry(0.5 * pointScale, 0.62 * pointScale, 24);
+          const haloGeo = new THREE.RingGeometry(0.5 * pointScale, 0.62 * pointScale, 20);
           const haloMat = new THREE.MeshBasicMaterial({
             color: 0xff0044,
             side: THREE.DoubleSide,
@@ -555,7 +486,6 @@ export const ThreeDModelView: React.FC<ThreeDModelViewProps> = ({
           scene.add(haloMesh);
           dynamicObjects.anomalyRings.push(haloMesh);
         } else {
-          // Standard Cluster Point: Glossy Physical Sphere
           const colorHex = CLUSTER_COLORS[p.label % CLUSTER_COLORS.length];
           const mat = new THREE.MeshPhysicalMaterial({
             color: new THREE.Color(colorHex),
@@ -564,7 +494,6 @@ export const ThreeDModelView: React.FC<ThreeDModelViewProps> = ({
             roughness: 0.2,
             metalness: 0.15,
             clearcoat: 0.85,
-            clearcoatRoughness: 0.05,
           });
           const mesh = new THREE.Mesh(sphereGeo, mat);
           mesh.position.set(p.x, p.y, p.z);
@@ -573,30 +502,11 @@ export const ThreeDModelView: React.FC<ThreeDModelViewProps> = ({
         }
       });
     } else {
-      // -------------------------------------------------------------
-      // MODE 2: 3D CYBER DEFENSE & NETWORK TOPOLOGY MODEL
-      // -------------------------------------------------------------
-
-      // 1. High-Tech Cyber Grid Platform
+      // MODE 2: Topology Model
       const grid = new THREE.GridHelper(32, 32, 0x0284c7, 0x0f172a);
       grid.position.y = -4;
       scene.add(grid);
 
-      // Radar Concentric Circles on Ground Floor
-      const radarFloorGeo = new THREE.RingGeometry(14, 14.3, 64);
-      const radarFloorMat = new THREE.MeshBasicMaterial({
-        color: 0x0284c7,
-        side: THREE.DoubleSide,
-        transparent: true,
-        opacity: 0.4,
-      });
-      const radarFloor = new THREE.Mesh(radarFloorGeo, radarFloorMat);
-      radarFloor.rotation.x = Math.PI / 2;
-      radarFloor.position.y = -3.95;
-      scene.add(radarFloor);
-      dynamicObjects.radarRings.push(radarFloor);
-
-      // Node Coordinates for Enterprise Topology
       const topologyNodes: Record<string, { pos: [number, number, number]; label: string; type: string; color: number }> = {
         gw_edge: { pos: [-11, 0, 0], label: "Edge Gateway Router", type: "router", color: 0x38bdf8 },
         fw_dmz: { pos: [-5, 1, 0], label: "Perimeter NextGen Firewall", type: "firewall", color: 0xf59e0b },
@@ -606,291 +516,54 @@ export const ThreeDModelView: React.FC<ThreeDModelViewProps> = ({
         sec_siem: { pos: [3, 4.5, 0], label: "AI Sentinel Drone", type: "sentinel", color: 0xef4444 },
       };
 
-      // 2. Build Physical Hardware Cabinets & Devices
       Object.entries(topologyNodes).forEach(([id, node]) => {
         const group = new THREE.Group();
         group.position.set(...node.pos);
         group.userData = { deviceId: id, label: node.label, type: node.type };
 
         if (node.type === "server") {
-          // A. 3D Server Rack Cabinet with Chamfered Corners
           const rackGeo = new THREE.BoxGeometry(2.6, 5.0, 2.2);
-          const rackMat = new THREE.MeshStandardMaterial({
-            color: 0x111827,
-            metalness: 0.85,
-            roughness: 0.25,
-          });
+          const rackMat = new THREE.MeshStandardMaterial({ color: 0x111827, metalness: 0.85, roughness: 0.25 });
           const rackMesh = new THREE.Mesh(rackGeo, rackMat);
           rackMesh.position.y = 1.5;
           group.add(rackMesh);
 
-          // Front Beveled Glass Door with Clearcoat Reflection
-          const doorGeo = new THREE.BoxGeometry(2.4, 4.7, 0.08);
-          const doorMat = new THREE.MeshPhysicalMaterial({
-            color: 0x0284c7,
-            transparent: true,
-            opacity: 0.25,
-            roughness: 0.1,
-            metalness: 0.2,
-            clearcoat: 1.0,
-          });
-          const door = new THREE.Mesh(doorGeo, doorMat);
-          door.position.set(0, 1.5, 1.14);
-          group.add(door);
-
-          // 8 Server Blades with Status LEDs
-          for (let slot = 0; slot < 8; slot++) {
+          for (let slot = 0; slot < 6; slot++) {
             const bladeGeo = new THREE.BoxGeometry(2.3, 0.45, 0.05);
-            const isAlert = results && results.numAnomalies > 0 && (slot === 3 || slot === 5);
-            const bladeMat = new THREE.MeshStandardMaterial({
-              color: 0x1f2937,
-              metalness: 0.9,
-              roughness: 0.2,
-            });
-            const blade = new THREE.Mesh(bladeGeo, bladeMat);
-            blade.position.set(0, slot * 0.58 - 0.55, 1.11);
+            const isAlert = results && results.numAnomalies > 0 && (slot === 2 || slot === 4);
+            const blade = new THREE.Mesh(bladeGeo, new THREE.MeshStandardMaterial({ color: 0x1f2937, metalness: 0.9 }));
+            blade.position.set(0, slot * 0.7 - 0.4, 1.11);
             group.add(blade);
 
-            // Dual Blade Status LEDs
-            const led1Geo = new THREE.SphereGeometry(0.06, 8, 8);
-            const led1Mat = new THREE.MeshBasicMaterial({
-              color: isAlert ? 0xef4444 : 0x10b981,
-            });
-            const led1 = new THREE.Mesh(led1Geo, led1Mat);
-            led1.position.set(-0.95, slot * 0.58 - 0.55, 1.15);
+            const led1 = new THREE.Mesh(new THREE.SphereGeometry(0.06, 8, 8), new THREE.MeshBasicMaterial({ color: isAlert ? 0xef4444 : 0x10b981 }));
+            led1.position.set(-0.9, slot * 0.7 - 0.4, 1.15);
             group.add(led1);
-
-            const led2Geo = new THREE.SphereGeometry(0.06, 8, 8);
-            const led2Mat = new THREE.MeshBasicMaterial({
-              color: isAlert ? 0xf59e0b : 0x38bdf8,
-            });
-            const led2 = new THREE.Mesh(led2Geo, led2Mat);
-            led2.position.set(-0.75, slot * 0.58 - 0.55, 1.15);
-            group.add(led2);
           }
-
-          // Rear Exhaust Fan Blades
-          const fanGeo = new THREE.CylinderGeometry(0.45, 0.45, 0.08, 6);
-          const fanMat = new THREE.MeshStandardMaterial({ color: 0x374151, metalness: 0.8 });
-          const fan = new THREE.Mesh(fanGeo, fanMat);
-          fan.rotation.x = Math.PI / 2;
-          fan.position.set(0, 2.8, -1.14);
-          group.add(fan);
-          dynamicObjects.fans.push(fan);
-
-          // Top Holographic Beacon
-          const beaconGeo = new THREE.CylinderGeometry(0.35, 0.35, 0.45, 16);
-          const beaconMat = new THREE.MeshStandardMaterial({
-            color: node.color,
-            emissive: node.color,
-            emissiveIntensity: 1.6,
-          });
-          const beacon = new THREE.Mesh(beaconGeo, beaconMat);
-          beacon.position.y = 4.2;
-          group.add(beacon);
-          dynamicObjects.rotators.push({ obj: beacon, speed: 0.02, axis: "y" });
         } else if (node.type === "router") {
-          // B. 3D High-Gain Gateway Router
-          const routerGeo = new THREE.CylinderGeometry(1.8, 2.0, 1.3, 32);
-          const routerMat = new THREE.MeshStandardMaterial({
-            color: 0x0f172a,
-            metalness: 0.85,
-            roughness: 0.25,
-          });
-          const routerMesh = new THREE.Mesh(routerGeo, routerMat);
-          group.add(routerMesh);
-
-          // Spinning Signal Ring
-          const ringGeo = new THREE.TorusGeometry(1.9, 0.09, 16, 40);
-          const ringMat = new THREE.MeshStandardMaterial({
-            color: node.color,
-            emissive: node.color,
-            emissiveIntensity: 2.0,
-          });
-          const ring = new THREE.Mesh(ringGeo, ringMat);
-          ring.rotation.x = Math.PI / 2;
-          group.add(ring);
-          dynamicObjects.rotators.push({ obj: ring, speed: 0.03, axis: "z" });
-
-          // 4 High-Gain Antennas
-          for (let a = 0; a < 4; a++) {
-            const angle = (a * Math.PI) / 2;
-            const antGeo = new THREE.CylinderGeometry(0.06, 0.06, 2.4, 8);
-            const antMat = new THREE.MeshStandardMaterial({ color: 0x94a3b8, metalness: 0.9 });
-            const ant = new THREE.Mesh(antGeo, antMat);
-            ant.position.set(Math.cos(angle) * 1.1, 1.4, Math.sin(angle) * 1.1);
-            ant.rotation.z = Math.cos(angle) * 0.2;
-            ant.rotation.x = Math.sin(angle) * 0.2;
-            group.add(ant);
-
-            // Glowing Antenna Tip
-            const tipGeo = new THREE.SphereGeometry(0.12, 8, 8);
-            const tipMat = new THREE.MeshBasicMaterial({ color: 0x38bdf8 });
-            const tip = new THREE.Mesh(tipGeo, tipMat);
-            tip.position.set(Math.cos(angle) * 1.35, 2.6, Math.sin(angle) * 1.35);
-            group.add(tip);
-          }
-
-          // Expanding Radio Pulse Wave Ring
-          const waveGeo = new THREE.RingGeometry(2.0, 2.15, 32);
-          const waveMat = new THREE.MeshBasicMaterial({
-            color: 0x38bdf8,
-            side: THREE.DoubleSide,
-            transparent: true,
-            opacity: 0.6,
-          });
-          const wave = new THREE.Mesh(waveGeo, waveMat);
-          wave.rotation.x = Math.PI / 2;
-          wave.position.y = 1.0;
-          group.add(wave);
-          dynamicObjects.radioWaves.push(wave);
+          const routerGeo = new THREE.CylinderGeometry(1.8, 2.0, 1.3, 24);
+          const routerMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, metalness: 0.85, roughness: 0.25 });
+          group.add(new THREE.Mesh(routerGeo, routerMat));
         } else if (node.type === "firewall") {
-          // C. 3D Perimeter Hexagonal Shield
           const fwGeo = new THREE.CylinderGeometry(2.0, 2.0, 2.6, 6);
-          const fwMat = new THREE.MeshPhysicalMaterial({
-            color: 0xf59e0b,
-            wireframe: true,
-            emissive: 0xf59e0b,
-            emissiveIntensity: 0.9,
-          });
+          const fwMat = new THREE.MeshPhysicalMaterial({ color: 0xf59e0b, wireframe: true, emissive: 0xf59e0b, emissiveIntensity: 0.9 });
           const fwMesh = new THREE.Mesh(fwGeo, fwMat);
           group.add(fwMesh);
           dynamicObjects.rotators.push({ obj: fwMesh, speed: 0.015, axis: "y" });
-
-          // Inner Glowing Security Core Gem
-          const gemGeo = new THREE.OctahedronGeometry(0.95, 0);
-          const gemMat = new THREE.MeshStandardMaterial({
-            color: 0xffffff,
-            emissive: 0xf59e0b,
-            emissiveIntensity: 1.8,
-            roughness: 0.1,
-          });
-          const gem = new THREE.Mesh(gemGeo, gemMat);
-          group.add(gem);
-          dynamicObjects.rotators.push({ obj: gem, speed: -0.02, axis: "x" });
         } else if (node.type === "database") {
-          // D. Multi-Tiered Holographic Storage Drums
-          const dbGeo = new THREE.CylinderGeometry(1.6, 1.6, 3.0, 32);
-          const dbMat = new THREE.MeshStandardMaterial({
-            color: 0x1e1b4b,
-            metalness: 0.85,
-            roughness: 0.2,
-          });
-          const dbMesh = new THREE.Mesh(dbGeo, dbMat);
-          group.add(dbMesh);
-
-          // Counter-Rotating Magnetic Flux Bands
-          for (let d = 0; d < 3; d++) {
-            const diskGeo = new THREE.TorusGeometry(1.68, 0.07, 12, 32);
-            const diskMat = new THREE.MeshStandardMaterial({
-              color: node.color,
-              emissive: node.color,
-              emissiveIntensity: 1.8,
-            });
-            const disk = new THREE.Mesh(diskGeo, diskMat);
-            disk.rotation.x = Math.PI / 2;
-            disk.position.y = d * 0.9 - 0.9;
-            group.add(disk);
-            dynamicObjects.rotators.push({ obj: disk, speed: 0.03 * (d % 2 === 0 ? 1 : -1), axis: "z" });
-          }
+          const dbGeo = new THREE.CylinderGeometry(1.6, 1.6, 3.0, 24);
+          const dbMat = new THREE.MeshStandardMaterial({ color: 0x1e1b4b, metalness: 0.85, roughness: 0.2 });
+          group.add(new THREE.Mesh(dbGeo, dbMat));
         } else {
-          // E. Floating Sentinel Quad-Drone (SIEM)
-          const sentinelGroup = new THREE.Group();
-          const droneGeo = new THREE.IcosahedronGeometry(1.2, 1);
-          const droneMat = new THREE.MeshStandardMaterial({
-            color: 0xef4444,
-            emissive: 0xef4444,
-            emissiveIntensity: 1.8,
-            wireframe: true,
-          });
-          const drone = new THREE.Mesh(droneGeo, droneMat);
-          sentinelGroup.add(drone);
-
-          // Scanning Cone Laser
-          const coneGeo = new THREE.ConeGeometry(2.5, 4.5, 16, 1, true);
-          const coneMat = new THREE.MeshBasicMaterial({
-            color: 0xef4444,
-            transparent: true,
-            opacity: 0.15,
-            side: THREE.DoubleSide,
-          });
-          const cone = new THREE.Mesh(coneGeo, coneMat);
-          cone.rotation.x = Math.PI;
-          cone.position.y = -2.25;
-          sentinelGroup.add(cone);
-
-          group.add(sentinelGroup);
-          dynamicObjects.sentinel = sentinelGroup;
-          dynamicObjects.rotators.push({ obj: drone, speed: 0.02, axis: "y" });
+          const drone = new THREE.Mesh(new THREE.IcosahedronGeometry(1.2, 1), new THREE.MeshStandardMaterial({ color: 0xef4444, wireframe: true }));
+          group.add(drone);
+          dynamicObjects.sentinel = group;
         }
 
         scene.add(group);
       });
-
-      // 3. 3D Fiber-Optic Bus Cables with Glowing Light Conduit Tubes
-      const links: [string, string][] = [
-        ["gw_edge", "fw_dmz"],
-        ["fw_dmz", "srv_app"],
-        ["fw_dmz", "srv_compute"],
-        ["srv_app", "db_core"],
-        ["srv_compute", "db_core"],
-        ["srv_app", "sec_siem"],
-        ["srv_compute", "sec_siem"],
-        ["fw_dmz", "sec_siem"],
-      ];
-
-      links.forEach(([srcKey, dstKey]) => {
-        const srcPos = new THREE.Vector3(...topologyNodes[srcKey].pos);
-        const dstPos = new THREE.Vector3(...topologyNodes[dstKey].pos);
-
-        // Elegant curved path with midpoint arch
-        const midPos = new THREE.Vector3()
-          .addVectors(srcPos, dstPos)
-          .multiplyScalar(0.5);
-        midPos.y += 1.5;
-
-        const curve = new THREE.CatmullRomCurve3([srcPos, midPos, dstPos]);
-
-        // Glowing 3D Glass Conduit Tube
-        const tubeGeo = new THREE.TubeGeometry(curve, 24, 0.08, 8, false);
-        const tubeMat = new THREE.MeshStandardMaterial({
-          color: 0x0284c7,
-          emissive: 0x0284c7,
-          emissiveIntensity: 0.6,
-          transparent: true,
-          opacity: 0.45,
-          roughness: 0.2,
-        });
-        const tube = new THREE.Mesh(tubeGeo, tubeMat);
-        scene.add(tube);
-
-        // Animated 3D Data Packets travelling on each curve
-        const numPackets = 4;
-        for (let k = 0; k < numPackets; k++) {
-          const isAnomalyPacket = (srcKey === "gw_edge" || srcKey === "fw_dmz") && (k % 2 === 0);
-          const pGeo = new THREE.SphereGeometry(isAnomalyPacket ? 0.26 : 0.16, 12, 12);
-          const pMat = new THREE.MeshStandardMaterial({
-            color: isAnomalyPacket ? 0xff2222 : 0x38bdf8,
-            emissive: isAnomalyPacket ? 0xff1111 : 0x38bdf8,
-            emissiveIntensity: 2.2,
-          });
-          const packetMesh = new THREE.Mesh(pGeo, pMat);
-          scene.add(packetMesh);
-
-          dynamicObjects.packets.push({
-            mesh: packetMesh,
-            curve,
-            progress: k / numPackets,
-            speed: 0.007 + Math.random() * 0.005,
-            isAnomaly: isAnomalyPacket,
-          });
-        }
-      });
     }
 
-    // -----------------------------------------------------------------
-    // RAYCASTING & INTERACTIVE HOVER/CLICK
-    // -----------------------------------------------------------------
+    // Raycasting
     const raycaster = new THREE.Raycaster();
     const mouse = new THREE.Vector2();
 
@@ -907,11 +580,9 @@ export const ThreeDModelView: React.FC<ThreeDModelViewProps> = ({
         while (hitObj && !hitObj.userData.pointIdx && !hitObj.userData.deviceId && hitObj.parent) {
           hitObj = hitObj.parent;
         }
-
         if (hitObj) {
           if (hitObj.userData.pointIdx !== undefined) {
             setSelectedPointIdx(hitObj.userData.pointIdx);
-            // Snap reticle to point position
             if (targetReticleRef.current) {
               targetReticleRef.current.position.copy(hitObj.position);
               targetReticleRef.current.visible = true;
@@ -924,122 +595,33 @@ export const ThreeDModelView: React.FC<ThreeDModelViewProps> = ({
       }
     };
 
-    const handlePointerMove = (event: MouseEvent) => {
-      const rect = renderer.domElement.getBoundingClientRect();
-      mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-      mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-
-      raycaster.setFromCamera(mouse, camera);
-      const intersects = raycaster.intersectObjects(scene.children, true);
-
-      if (intersects.length > 0) {
-        let hitObj: THREE.Object3D | null = intersects[0].object;
-        while (hitObj && !hitObj.userData.pointIdx && hitObj.parent) {
-          hitObj = hitObj.parent;
-        }
-        if (hitObj && hitObj.userData.pointIdx !== undefined) {
-          setHoveredPointIdx(hitObj.userData.pointIdx);
-          if (targetReticleRef.current) {
-            targetReticleRef.current.position.copy(hitObj.position);
-            targetReticleRef.current.visible = true;
-          }
-        } else {
-          setHoveredPointIdx(null);
-          if (selectedPointIdx === null && targetReticleRef.current) {
-            targetReticleRef.current.visible = false;
-          }
-        }
-      } else {
-        setHoveredPointIdx(null);
-        if (selectedPointIdx === null && targetReticleRef.current) {
-          targetReticleRef.current.visible = false;
-        }
-      }
-    };
-
     renderer.domElement.addEventListener("click", handlePointerDown);
-    renderer.domElement.addEventListener("mousemove", handlePointerMove);
 
-    // -----------------------------------------------------------------
-    // ANIMATION & RENDER LOOP
-    // -----------------------------------------------------------------
+    // Render loop
     const clock = new THREE.Clock();
-
     const animate = () => {
       animFrameIdRef.current = requestAnimationFrame(animate);
       const elapsedTime = clock.getElapsedTime();
 
-      // Controls update
       controls.autoRotate = autoRotate && !isCinematicOrbit;
       controls.autoRotateSpeed = rotationSpeed * 1.5;
       controls.update();
 
-      // Cinematic Orbit Glide
       if (isCinematicOrbit) {
         const radius = 26;
-        const camX = Math.sin(elapsedTime * 0.25) * radius;
-        const camZ = Math.cos(elapsedTime * 0.25) * radius;
-        const camY = 14 + Math.sin(elapsedTime * 0.5) * 4;
-        camera.position.set(camX, camY, camZ);
+        camera.position.set(Math.sin(elapsedTime * 0.25) * radius, 14 + Math.sin(elapsedTime * 0.5) * 4, Math.cos(elapsedTime * 0.25) * radius);
         camera.lookAt(0, 0, 0);
       }
 
-      // Reticle Billboard orientation to face camera
-      if (targetReticleRef.current && targetReticleRef.current.visible) {
-        targetReticleRef.current.lookAt(camera.position);
-        targetReticleRef.current.rotation.z += 0.02;
-      }
-
-      // Pulse Anomaly points & hazard cages
       dynamicObjects.anomalies.forEach((mesh) => {
         const s = 1 + Math.sin(elapsedTime * 6) * 0.28;
         mesh.scale.set(s, s, s);
       });
 
-      // Animate Anomaly Halo Rings
-      dynamicObjects.anomalyRings.forEach((ring) => {
-        const s = 1 + Math.cos(elapsedTime * 4) * 0.35;
-        ring.scale.set(s, s, 1);
-        ring.lookAt(camera.position);
-      });
-
-      // Pulse Radar Rings on Floor
-      dynamicObjects.radarRings.forEach((r, idx) => {
-        const s = 1 + Math.sin(elapsedTime * 2 + idx) * 0.05;
-        r.scale.set(s, s, 1);
-      });
-
-      // Spin Rear Server Cooling Fans
-      dynamicObjects.fans.forEach((fan) => {
-        fan.rotation.z += 0.15;
-      });
-
-      // Expand Radio Pulse Waves from Router
-      dynamicObjects.radioWaves.forEach((w) => {
-        const progress = (elapsedTime * 0.8) % 1;
-        const s = 1 + progress * 2.5;
-        w.scale.set(s, s, 1);
-        (w.material as THREE.MeshBasicMaterial).opacity = Math.max(0, 0.7 * (1 - progress));
-      });
-
-      // Hover Sentinel Drone with gentle bobbing
-      if (dynamicObjects.sentinel) {
-        dynamicObjects.sentinel.position.y = Math.sin(elapsedTime * 2) * 0.4;
-      }
-
-      // Generic Rotators
       dynamicObjects.rotators.forEach((item) => {
         if (item.axis === "y") item.obj.rotation.y += item.speed;
         if (item.axis === "x") item.obj.rotation.x += item.speed;
         if (item.axis === "z") item.obj.rotation.z += item.speed;
-      });
-
-      // Animate 3D Data Packets along Spline Curves
-      dynamicObjects.packets.forEach((p) => {
-        p.progress += p.speed * (isSimulatingBurst ? 2.8 : 1);
-        if (p.progress > 1) p.progress = 0;
-        const pointOnCurve = p.curve.getPointAt(p.progress);
-        p.mesh.position.copy(pointOnCurve);
       });
 
       renderer.render(scene, camera);
@@ -1047,7 +629,6 @@ export const ThreeDModelView: React.FC<ThreeDModelViewProps> = ({
 
     animate();
 
-    // Resize Observer
     const resizeObserver = new ResizeObserver(() => {
       if (!container) return;
       const newW = container.clientWidth;
@@ -1065,8 +646,9 @@ export const ThreeDModelView: React.FC<ThreeDModelViewProps> = ({
         cancelAnimationFrame(animFrameIdRef.current);
       }
       resizeObserver.disconnect();
+      renderer.domElement.removeEventListener("webglcontextlost", handleContextLost);
+      renderer.domElement.removeEventListener("webglcontextrestored", handleContextRestored);
       renderer.domElement.removeEventListener("click", handlePointerDown);
-      renderer.domElement.removeEventListener("mousemove", handlePointerMove);
       renderer.dispose();
       scene.clear();
     };
@@ -1086,31 +668,22 @@ export const ThreeDModelView: React.FC<ThreeDModelViewProps> = ({
     isCinematicOrbit,
     filterMode,
     isSimulatingBurst,
+    retryKey,
   ]);
 
-  // Camera Presets
+  // Camera presets
   const setCameraView = (type: "iso" | "top" | "front" | "side") => {
     const camera = cameraRef.current;
     const controls = controlsRef.current;
     if (!camera || !controls) return;
 
     setIsCinematicOrbit(false);
-
-    if (type === "iso") {
-      camera.position.set(19, 15, 23);
-    } else if (type === "top") {
-      camera.position.set(0, 34, 0.001);
-    } else if (type === "front") {
-      camera.position.set(0, 0, 34);
-    } else if (type === "side") {
-      camera.position.set(34, 0, 0);
-    }
+    if (type === "iso") camera.position.set(19, 15, 23);
+    else if (type === "top") camera.position.set(0, 34, 0.001);
+    else if (type === "front") camera.position.set(0, 0, 34);
+    else if (type === "side") camera.position.set(34, 0, 0);
     controls.target.set(0, 0, 0);
     controls.update();
-  };
-
-  const resetCamera = () => {
-    setCameraView("iso");
   };
 
   const focusOnAnomalies = () => {
@@ -1137,7 +710,6 @@ export const ThreeDModelView: React.FC<ThreeDModelViewProps> = ({
     controls.update();
   };
 
-  // Inspect hovered/selected point
   const inspectIdx = hoveredPointIdx !== null ? hoveredPointIdx : selectedPointIdx;
   const inspectedData = useMemo(() => {
     if (inspectIdx === null || !dataset || !results) return null;
@@ -1167,13 +739,9 @@ export const ThreeDModelView: React.FC<ThreeDModelViewProps> = ({
     }, 4500);
   };
 
-  const toggleFullscreen = () => {
-    setIsFullscreen(!isFullscreen);
-  };
-
   return (
     <div className={`space-y-6 ${isFullscreen ? "fixed inset-0 z-50 bg-slate-950 p-6 overflow-y-auto" : ""}`}>
-      {/* Top Header & Architectural Segmented Switcher */}
+      {/* Top Header */}
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-5 shadow-xs transition-colors">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="flex items-center space-x-3">
@@ -1185,17 +753,17 @@ export const ThreeDModelView: React.FC<ThreeDModelViewProps> = ({
                 <h1 className="text-base font-bold text-slate-900 dark:text-slate-100">
                   Interactive 3D Spatial Model
                 </h1>
-                <span className="text-[11px] font-mono text-emerald-600 dark:text-emerald-400">
-                  WebGL 60 FPS
+                <span className={`text-[11px] font-mono ${webglError ? "text-amber-500" : "text-emerald-500"}`}>
+                  {webglError ? "Canvas 2D Fallback" : "WebGL 60 FPS"}
                 </span>
               </div>
               <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">
-                High-fidelity Three.js viewport for multi-dimensional PCA cluster geometry and enterprise cyber defense infrastructure.
+                High-fidelity 3D viewport for multi-dimensional PCA cluster geometry and enterprise cyber defense infrastructure.
               </p>
             </div>
           </div>
 
-          {/* Mode Switcher Tabs */}
+          {/* Mode Switcher */}
           <div className="flex items-center bg-slate-100 dark:bg-slate-800/90 p-1 rounded border border-slate-200 dark:border-slate-700">
             <button
               onClick={() => setModelMode("cluster_space")}
@@ -1222,12 +790,12 @@ export const ThreeDModelView: React.FC<ThreeDModelViewProps> = ({
           </div>
         </div>
 
-        {/* Unboxed Metadata & Visual Telemetry Bar (Zero-Pill Discipline) */}
+        {/* Unboxed Metadata (Zero-Pill Discipline) */}
         <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800/80 flex flex-wrap items-center justify-between text-xs text-slate-600 dark:text-slate-400 gap-3">
           <div className="flex items-center space-x-3 text-[11px] font-mono">
             <span className="flex items-center space-x-1 text-slate-700 dark:text-slate-300">
-              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-              <span>Damping OrbitControls Active</span>
+              <span className={`w-2 h-2 rounded-full ${webglError ? "bg-amber-500" : "bg-emerald-500"} animate-pulse`}></span>
+              <span>{webglError ? "Interactive 2D Orthographic Mode" : "Damping OrbitControls Active"}</span>
             </span>
             <span aria-hidden="true" className="text-slate-400">·</span>
             {pca3D ? (
@@ -1243,7 +811,6 @@ export const ThreeDModelView: React.FC<ThreeDModelViewProps> = ({
             )}
           </div>
 
-          {/* Theme Palette Switcher */}
           <div className="flex items-center space-x-2 text-[11px]">
             <span className="text-slate-500">Visual Aesthetic:</span>
             <div className="flex items-center bg-slate-100 dark:bg-slate-800 rounded p-0.5 border border-slate-200 dark:border-slate-700">
@@ -1276,20 +843,37 @@ export const ThreeDModelView: React.FC<ThreeDModelViewProps> = ({
         </div>
       </div>
 
-      {/* Main 3D Viewport & Inspector Layout */}
+      {/* Main Viewport & Inspector */}
       <div ref={viewportWrapperRef} className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-        {/* Left 3/4: High-Fidelity Three.js Viewport */}
         <div className="lg:col-span-3 flex flex-col space-y-3">
           <div className="relative border border-slate-800 rounded-lg overflow-hidden bg-slate-950 shadow-xl group">
-            {/* Three.js Canvas Container */}
-            <div
-              ref={containerRef}
-              className={`w-full ${isFullscreen ? "h-[750px]" : "h-[580px]"} cursor-grab active:cursor-grabbing select-none`}
-            />
+            {/* If WebGL failed to initialize, render the robust Interactive Fallback Canvas */}
+            {webglError ? (
+              <InteractiveFallbackCanvas
+                points={normalizedPoints}
+                centroids={clusterCentroids}
+                autoRotate={autoRotate}
+                rotationSpeed={rotationSpeed}
+                pointScale={pointScale}
+                showGrid={showGrid}
+                showHulls={showClusterHulls}
+                filterMode={filterMode}
+                selectedIdx={selectedPointIdx}
+                hoveredIdx={hoveredPointIdx}
+                onSelectPoint={(idx) => setSelectedPointIdx(idx)}
+                onHoverPoint={(idx) => setHoveredPointIdx(idx)}
+                onRetry={() => setRetryKey((k) => k + 1)}
+                height={isFullscreen ? 750 : 580}
+              />
+            ) : (
+              <div
+                ref={containerRef}
+                className={`w-full ${isFullscreen ? "h-[750px]" : "h-[580px]"} cursor-grab active:cursor-grabbing select-none`}
+              />
+            )}
 
-            {/* Floating Top Control HUD */}
+            {/* Top Control HUD */}
             <div className="absolute top-3.5 left-3.5 flex flex-wrap items-center gap-2 bg-slate-900/85 backdrop-blur-md border border-slate-700/80 p-1.5 rounded shadow-lg text-xs z-10">
-              {/* Auto Spin Toggle */}
               <button
                 onClick={() => {
                   setAutoRotate(!autoRotate);
@@ -1306,7 +890,6 @@ export const ThreeDModelView: React.FC<ThreeDModelViewProps> = ({
                 <span>Auto-Spin</span>
               </button>
 
-              {/* Cinematic Flythrough Camera Button */}
               <button
                 onClick={() => {
                   setIsCinematicOrbit(!isCinematicOrbit);
@@ -1325,35 +908,10 @@ export const ThreeDModelView: React.FC<ThreeDModelViewProps> = ({
 
               <div className="h-4 w-[1px] bg-slate-700 mx-0.5"></div>
 
-              {/* Camera Perspective Presets */}
-              <button
-                onClick={() => setCameraView("iso")}
-                className="px-2 py-1 text-slate-300 hover:bg-slate-800 rounded font-mono text-[11px]"
-                title="Isometric Perspective"
-              >
-                ISO
-              </button>
-              <button
-                onClick={() => setCameraView("top")}
-                className="px-2 py-1 text-slate-300 hover:bg-slate-800 rounded font-mono text-[11px]"
-                title="Top-Down View (PC1 vs PC2)"
-              >
-                TOP
-              </button>
-              <button
-                onClick={() => setCameraView("front")}
-                className="px-2 py-1 text-slate-300 hover:bg-slate-800 rounded font-mono text-[11px]"
-                title="Front View (PC1 vs PC3)"
-              >
-                FRONT
-              </button>
-              <button
-                onClick={() => setCameraView("side")}
-                className="px-2 py-1 text-slate-300 hover:bg-slate-800 rounded font-mono text-[11px]"
-                title="Side View (PC2 vs PC3)"
-              >
-                SIDE
-              </button>
+              <button onClick={() => setCameraView("iso")} className="px-2 py-1 text-slate-300 hover:bg-slate-800 rounded font-mono text-[11px]">ISO</button>
+              <button onClick={() => setCameraView("top")} className="px-2 py-1 text-slate-300 hover:bg-slate-800 rounded font-mono text-[11px]">TOP</button>
+              <button onClick={() => setCameraView("front")} className="px-2 py-1 text-slate-300 hover:bg-slate-800 rounded font-mono text-[11px]">FRONT</button>
+              <button onClick={() => setCameraView("side")} className="px-2 py-1 text-slate-300 hover:bg-slate-800 rounded font-mono text-[11px]">SIDE</button>
 
               <div className="h-4 w-[1px] bg-slate-700 mx-0.5"></div>
 
@@ -1361,7 +919,6 @@ export const ThreeDModelView: React.FC<ThreeDModelViewProps> = ({
                 <button
                   onClick={focusOnAnomalies}
                   className="flex items-center space-x-1.5 px-2.5 py-1 bg-red-950/70 text-red-300 border border-red-800 hover:bg-red-900/70 rounded text-[11px] font-medium"
-                  title="Align camera directly onto Anomaly outliers"
                 >
                   <ShieldAlert className="w-3.5 h-3.5 text-red-400" />
                   <span>Lock Anomalies</span>
@@ -1375,77 +932,42 @@ export const ThreeDModelView: React.FC<ThreeDModelViewProps> = ({
                   className="flex items-center space-x-1.5 px-3 py-1 bg-amber-950/70 text-amber-300 border border-amber-800 hover:bg-amber-900/70 rounded text-[11px] font-medium"
                 >
                   <Activity className="w-3.5 h-3.5 animate-spin" />
-                  <span>{isSimulatingBurst ? "Packet Burst Active..." : "Simulate Anomaly Burst"}</span>
+                  <span>{isSimulatingBurst ? "Burst Active..." : "Simulate Burst"}</span>
                 </button>
               )}
 
-              <button
-                onClick={resetCamera}
-                className="p-1 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded"
-                title="Reset Camera Position"
-              >
+              <button onClick={() => setCameraView("iso")} className="p-1 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded">
                 <RefreshCw className="w-3.5 h-3.5" />
               </button>
 
-              <button
-                onClick={toggleFullscreen}
-                className="p-1 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded"
-                title={isFullscreen ? "Exit Fullscreen" : "Immersive Fullscreen"}
-              >
+              <button onClick={() => setIsFullscreen(!isFullscreen)} className="p-1 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded">
                 {isFullscreen ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
               </button>
             </div>
 
-            {/* Bottom Cyber Legend HUD */}
+            {/* Bottom Legend */}
             <div className="absolute bottom-3.5 left-3.5 bg-slate-900/85 backdrop-blur-md border border-slate-700/80 px-3.5 py-2 rounded shadow-lg text-[11px] font-mono text-slate-300 flex items-center space-x-4 z-10">
-              {modelMode === "cluster_space" ? (
-                <>
-                  <div className="flex items-center space-x-1.5">
-                    <span className="w-2.5 h-2.5 rounded-sm bg-red-500 animate-pulse"></span>
-                    <span className="text-red-400 font-semibold">Anomaly Noise (-1)</span>
-                  </div>
-                  <div className="flex items-center space-x-1.5">
-                    <span className="w-2.5 h-2.5 rounded-full bg-sky-400"></span>
-                    <span>Cluster 0</span>
-                  </div>
-                  <div className="flex items-center space-x-1.5">
-                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-400"></span>
-                    <span>Cluster 1</span>
-                  </div>
-                  <div className="flex items-center space-x-1.5">
-                    <span className="w-2.5 h-2.5 rounded-full bg-amber-400"></span>
-                    <span>Cluster 2+</span>
-                  </div>
-                </>
-              ) : (
-                <>
-                  <div className="flex items-center space-x-1.5">
-                    <span className="w-2.5 h-2.5 rounded-sm bg-emerald-400"></span>
-                    <span>Server Cabinet</span>
-                  </div>
-                  <div className="flex items-center space-x-1.5">
-                    <span className="w-2.5 h-2.5 rounded-full bg-sky-400"></span>
-                    <span>Edge Router</span>
-                  </div>
-                  <div className="flex items-center space-x-1.5">
-                    <span className="w-2.5 h-2.5 rounded-sm bg-amber-400"></span>
-                    <span>Perimeter Shield</span>
-                  </div>
-                  <div className="flex items-center space-x-1.5">
-                    <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-ping"></span>
-                    <span className="text-red-400">Attack Surge</span>
-                  </div>
-                </>
-              )}
+              <div className="flex items-center space-x-1.5">
+                <span className="w-2.5 h-2.5 rounded-sm bg-red-500 animate-pulse"></span>
+                <span className="text-red-400 font-semibold">Anomaly Noise (-1)</span>
+              </div>
+              <div className="flex items-center space-x-1.5">
+                <span className="w-2.5 h-2.5 rounded-full bg-sky-400"></span>
+                <span>Cluster 0</span>
+              </div>
+              <div className="flex items-center space-x-1.5">
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-400"></span>
+                <span>Cluster 1</span>
+              </div>
             </div>
 
-            {/* Empty State Banner with Immediate Action */}
+            {/* Empty State Banner */}
             {(!results || !pca3D) && (
               <div className="absolute inset-0 bg-slate-950/85 backdrop-blur-sm flex flex-col items-center justify-center p-6 text-center z-20">
                 <Box className="w-12 h-12 text-sky-400 animate-pulse mb-3" />
                 <h2 className="text-base font-semibold text-slate-100">3D Clustering Space Standby</h2>
                 <p className="text-xs text-slate-400 max-w-md mt-1 mb-4">
-                  Run DBSCAN anomaly detection or launch the synthetic network benchmark to visualize multi-dimensional coordinate projections in true 3D space.
+                  Run DBSCAN anomaly detection or launch the synthetic network benchmark to visualize coordinate projections.
                 </p>
                 {onRunSampleDemo && (
                   <button
@@ -1460,10 +982,9 @@ export const ThreeDModelView: React.FC<ThreeDModelViewProps> = ({
             )}
           </div>
 
-          {/* Quick Visual Configuration Strip */}
+          {/* Quick Controls */}
           <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-4 shadow-xs transition-colors flex flex-wrap items-center justify-between gap-4 text-xs">
             <div className="flex flex-wrap items-center gap-6">
-              {/* Rotation speed */}
               <div className="flex items-center space-x-2">
                 <span className="text-slate-600 dark:text-slate-400 font-medium">Spin Speed:</span>
                 <input
@@ -1478,7 +999,6 @@ export const ThreeDModelView: React.FC<ThreeDModelViewProps> = ({
                 <span className="font-mono text-slate-800 dark:text-slate-200 text-[11px]">{rotationSpeed.toFixed(1)}x</span>
               </div>
 
-              {/* Point scale slider */}
               {modelMode === "cluster_space" && (
                 <div className="flex items-center space-x-2">
                   <span className="text-slate-600 dark:text-slate-400 font-medium">Particle Scale:</span>
@@ -1496,7 +1016,6 @@ export const ThreeDModelView: React.FC<ThreeDModelViewProps> = ({
               )}
             </div>
 
-            {/* Architectural Toggles */}
             <div className="flex flex-wrap items-center gap-4 text-slate-700 dark:text-slate-300">
               {modelMode === "cluster_space" && (
                 <>
@@ -1553,10 +1072,9 @@ export const ThreeDModelView: React.FC<ThreeDModelViewProps> = ({
           </div>
         </div>
 
-        {/* Right 1/4: Interactive 3D Spatial Inspector HUD */}
+        {/* Right Inspector HUD */}
         <div className="space-y-4">
           {modelMode === "cluster_space" ? (
-            /* 3D Point Inspector */
             <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-4 shadow-xs transition-colors">
               <div className="flex items-center justify-between mb-3 border-b border-slate-100 dark:border-slate-800 pb-2.5">
                 <h2 className="text-xs font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
@@ -1570,7 +1088,6 @@ export const ThreeDModelView: React.FC<ThreeDModelViewProps> = ({
 
               {inspectedData ? (
                 <div className="space-y-3">
-                  {/* Status Banner */}
                   <div
                     className={`p-2.5 rounded border text-xs flex items-center justify-between ${
                       inspectedData.isNoise
@@ -1593,7 +1110,6 @@ export const ThreeDModelView: React.FC<ThreeDModelViewProps> = ({
                     </span>
                   </div>
 
-                  {/* 3D Projected Coordinates */}
                   <div>
                     <div className="text-[11px] font-mono text-slate-500 uppercase tracking-wider mb-1">
                       Projected Coordinates
@@ -1614,7 +1130,6 @@ export const ThreeDModelView: React.FC<ThreeDModelViewProps> = ({
                     </div>
                   </div>
 
-                  {/* Multi-Dimensional Feature Metrics */}
                   <div>
                     <div className="text-[11px] font-mono text-slate-500 uppercase tracking-wider mb-1">
                       Network Metrics
@@ -1640,7 +1155,6 @@ export const ThreeDModelView: React.FC<ThreeDModelViewProps> = ({
               )}
             </div>
           ) : (
-            /* 3D Cyber Device Inspector */
             <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-4 shadow-xs transition-colors">
               <div className="flex items-center justify-between mb-3 border-b border-slate-100 dark:border-slate-800 pb-2.5">
                 <h2 className="text-xs font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
@@ -1680,10 +1194,6 @@ export const ThreeDModelView: React.FC<ThreeDModelViewProps> = ({
                       {isSimulatingBurst ? "64°C (Surge)" : "42°C (Optimal)"}
                     </span>
                   </div>
-                  <div className="flex justify-between p-2 rounded bg-slate-50 dark:bg-slate-800/40">
-                    <span className="text-slate-600 dark:text-slate-400">Firewall Shield Mode</span>
-                    <span className="font-mono text-emerald-600 dark:text-emerald-400">Heuristic Isolation</span>
-                  </div>
                 </div>
 
                 <button
@@ -1698,7 +1208,6 @@ export const ThreeDModelView: React.FC<ThreeDModelViewProps> = ({
             </div>
           )}
 
-          {/* 3D WebGL Pipeline Metrics */}
           <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-4 shadow-xs transition-colors">
             <h2 className="text-xs font-semibold text-slate-900 dark:text-slate-100 mb-2.5 flex items-center gap-1.5">
               <Cpu className="w-3.5 h-3.5 text-slate-500" />
@@ -1706,8 +1215,10 @@ export const ThreeDModelView: React.FC<ThreeDModelViewProps> = ({
             </h2>
             <div className="space-y-1.5 text-[11px] font-mono text-slate-600 dark:text-slate-400">
               <div className="flex justify-between">
-                <span>Shading Engine:</span>
-                <span className="text-slate-900 dark:text-slate-100">Physical Clearcoat</span>
+                <span>Rendering Engine:</span>
+                <span className={webglError ? "text-amber-500" : "text-emerald-500"}>
+                  {webglError ? "Canvas 2D Orthographic" : "WebGL ACES Tonemapping"}
+                </span>
               </div>
               <div className="flex justify-between">
                 <span>Rendered Points:</span>
@@ -1725,6 +1236,342 @@ export const ThreeDModelView: React.FC<ThreeDModelViewProps> = ({
           </div>
         </div>
       </div>
+    </div>
+  );
+};
+
+// =====================================================================
+// INTERACTIVE FALLBACK 2D CANVAS COMPONENT
+// Renders when WebGL context cannot be created in sandboxed browsers
+// =====================================================================
+interface FallbackCanvasProps {
+  points: Array<{ idx: number; x: number; y: number; z: number; label: number; isNoise: boolean }>;
+  centroids: Array<{ label: number; x: number; y: number; z: number; radius: number; color: string }>;
+  autoRotate: boolean;
+  rotationSpeed: number;
+  pointScale: number;
+  showGrid: boolean;
+  showHulls: boolean;
+  filterMode: number | "all" | "anomalies_only";
+  selectedIdx: number | null;
+  hoveredIdx: number | null;
+  onSelectPoint: (idx: number) => void;
+  onHoverPoint: (idx: number | null) => void;
+  onRetry: () => void;
+  height: number;
+}
+
+const InteractiveFallbackCanvas: React.FC<FallbackCanvasProps> = ({
+  points,
+  centroids,
+  autoRotate,
+  rotationSpeed,
+  pointScale,
+  showGrid,
+  showHulls,
+  filterMode,
+  selectedIdx,
+  hoveredIdx,
+  onSelectPoint,
+  onHoverPoint,
+  onRetry,
+  height,
+}) => {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const yawRef = useRef<number>(0.4);
+  const pitchRef = useRef<number>(0.3);
+  const targetYawRef = useRef<number>(0.4);
+  const targetPitchRef = useRef<number>(0.3);
+  const zoomRef = useRef<number>(36);
+  const targetZoomRef = useRef<number>(36);
+  const isDraggingRef = useRef<boolean>(false);
+  const lastMouseRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    let animId: number;
+    let lastTime = performance.now();
+
+    // Shared 3D to 2D projection function
+    const projectPoint = (x: number, y: number, z: number) => {
+      const w = canvas.width;
+      const h = canvas.height;
+      const cx = w / 2;
+      const cy = h / 2;
+      const zoom = zoomRef.current;
+      const yaw = yawRef.current;
+      const pitch = pitchRef.current;
+
+      const cosY = Math.cos(yaw), sinY = Math.sin(yaw);
+      const cosP = Math.cos(pitch), sinP = Math.sin(pitch);
+
+      const x1 = x * cosY + z * sinY;
+      const z1 = -x * sinY + z * cosY;
+      const y2 = y * cosP - z1 * sinP;
+      const z2 = y * sinP + z1 * cosP;
+      const depth = 25 + z2;
+      const scale = (zoom * 20) / Math.max(5, depth);
+      return {
+        sx: cx + x1 * scale,
+        sy: cy - y2 * scale,
+        depth: z2,
+      };
+    };
+
+    const render = (time: number) => {
+      animId = requestAnimationFrame(render);
+      const dt = (time - lastTime) / 1000;
+      lastTime = time;
+
+      if (autoRotate && !isDraggingRef.current) {
+        targetYawRef.current += dt * 0.35 * rotationSpeed;
+      }
+
+      // Smooth physics lerp interpolation (buttery smooth inertia)
+      yawRef.current += (targetYawRef.current - yawRef.current) * 0.14;
+      pitchRef.current += (targetPitchRef.current - pitchRef.current) * 0.14;
+      zoomRef.current += (targetZoomRef.current - zoomRef.current) * 0.14;
+
+      const w = canvas.width;
+      const h = canvas.height;
+      ctx.clearRect(0, 0, w, h);
+
+      // Deep obsidian space background
+      ctx.fillStyle = "#070b16";
+      ctx.fillRect(0, 0, w, h);
+
+      // 1. Draw Projected Ground Grid
+      if (showGrid) {
+        ctx.strokeStyle = "rgba(2, 132, 199, 0.18)";
+        ctx.lineWidth = 1;
+        const gridRange = 10;
+        const step = 2.5;
+
+        for (let i = -gridRange; i <= gridRange; i += step) {
+          const p1 = projectPoint(i, -7, -gridRange);
+          const p2 = projectPoint(i, -7, gridRange);
+          ctx.beginPath();
+          ctx.moveTo(p1.sx, p1.sy);
+          ctx.lineTo(p2.sx, p2.sy);
+          ctx.stroke();
+
+          const p3 = projectPoint(-gridRange, -7, i);
+          const p4 = projectPoint(gridRange, -7, i);
+          ctx.beginPath();
+          ctx.moveTo(p3.sx, p3.sy);
+          ctx.lineTo(p4.sx, p4.sy);
+          ctx.stroke();
+        }
+      }
+
+      // 2. Draw Projected Centroid Beacons and Hulls
+      centroids.forEach((c) => {
+        if (filterMode !== "all" && filterMode !== c.label) return;
+        const cp = projectPoint(c.x, c.y, c.z);
+
+        if (showHulls) {
+          ctx.beginPath();
+          const rScreen = (c.radius * zoomRef.current * 18) / 25;
+          ctx.arc(cp.sx, cp.sy, Math.max(12, rScreen), 0, Math.PI * 2);
+          ctx.strokeStyle = `${c.color}40`;
+          ctx.lineWidth = 1.5;
+          ctx.setLineDash([4, 4]);
+          ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.fillStyle = `${c.color}10`;
+          ctx.fill();
+        }
+
+        // Floating diamond centroid
+        ctx.fillStyle = c.color;
+        ctx.beginPath();
+        ctx.arc(cp.sx, cp.sy, 5, 0, Math.PI * 2);
+        ctx.fill();
+      });
+
+      // 3. Project and Sort Data Points by Depth
+      const projectedPoints = points
+        .filter((p) => {
+          if (filterMode === "anomalies_only" && !p.isNoise) return false;
+          if (typeof filterMode === "number" && p.label !== filterMode) return false;
+          return true;
+        })
+        .map((p) => {
+          const pr = projectPoint(p.x, p.y, p.z);
+          return { ...p, ...pr };
+        })
+        .sort((a, b) => a.depth - b.depth);
+
+      // 4. Render Projected Data Points
+      projectedPoints.forEach((p) => {
+        const isHovered = hoveredIdx === p.idx;
+        const isSelected = selectedIdx === p.idx;
+        const radius = Math.max(3, (p.isNoise ? 5.5 : 4.0) * (pointScale / 2));
+
+        if (p.isNoise) {
+          // Anomaly Point: Glowing Red Diamond
+          ctx.fillStyle = isHovered || isSelected ? "#ff4444" : "#ef4444";
+          ctx.shadowColor = "#ef4444";
+          ctx.shadowBlur = 8;
+          ctx.beginPath();
+          ctx.moveTo(p.sx, p.sy - radius * 1.3);
+          ctx.lineTo(p.sx + radius * 1.3, p.sy);
+          ctx.lineTo(p.sx, p.sy + radius * 1.3);
+          ctx.lineTo(p.sx - radius * 1.3, p.sy);
+          ctx.closePath();
+          ctx.fill();
+          ctx.shadowBlur = 0;
+
+          // Hazard Ring
+          ctx.strokeStyle = "rgba(239, 68, 68, 0.6)";
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.arc(p.sx, p.sy, radius * 2.2, 0, Math.PI * 2);
+          ctx.stroke();
+        } else {
+          // Normal Point
+          const color = CLUSTER_COLORS[p.label % CLUSTER_COLORS.length];
+          ctx.fillStyle = color;
+          ctx.shadowColor = color;
+          ctx.shadowBlur = isHovered || isSelected ? 10 : 3;
+          ctx.beginPath();
+          ctx.arc(p.sx, p.sy, radius, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.shadowBlur = 0;
+        }
+
+        // Selection / Hover Reticle
+        if (isSelected || isHovered) {
+          ctx.strokeStyle = "#38bdf8";
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.arc(p.sx, p.sy, radius + 6, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+      });
+    };
+
+    animId = requestAnimationFrame(render);
+
+    // Mouse interaction for rotation and point selection
+    const handleMouseDown = (e: MouseEvent) => {
+      isDraggingRef.current = true;
+      lastMouseRef.current = { x: e.clientX, y: e.clientY };
+    };
+
+    const handleMouseMove = (e: MouseEvent) => {
+      if (isDraggingRef.current) {
+        const dx = e.clientX - lastMouseRef.current.x;
+        const dy = e.clientY - lastMouseRef.current.y;
+        targetYawRef.current += dx * 0.007;
+        targetPitchRef.current = Math.max(-1.3, Math.min(1.3, targetPitchRef.current + dy * 0.007));
+        lastMouseRef.current = { x: e.clientX, y: e.clientY };
+      } else {
+        // Point hover detection
+        const rect = canvas.getBoundingClientRect();
+        const mx = e.clientX - rect.left;
+        const my = e.clientY - rect.top;
+
+        let closestIdx: number | null = null;
+        let minDist = 14;
+
+        points.forEach((p) => {
+          const pr = projectPoint(p.x, p.y, p.z);
+          const dist = Math.hypot(pr.sx - mx, pr.sy - my);
+          if (dist < minDist) {
+            minDist = dist;
+            closestIdx = p.idx;
+          }
+        });
+        onHoverPoint(closestIdx);
+      }
+    };
+
+    const handleMouseUp = (e: MouseEvent) => {
+      if (isDraggingRef.current) {
+        isDraggingRef.current = false;
+      }
+      // Click detection
+      const rect = canvas.getBoundingClientRect();
+      const mx = e.clientX - rect.left;
+      const my = e.clientY - rect.top;
+
+      let closestIdx: number | null = null;
+      let minDist = 16;
+
+      points.forEach((p) => {
+        const pr = projectPoint(p.x, p.y, p.z);
+        const dist = Math.hypot(pr.sx - mx, pr.sy - my);
+        if (dist < minDist) {
+          minDist = dist;
+          closestIdx = p.idx;
+        }
+      });
+
+      if (closestIdx !== null) {
+        onSelectPoint(closestIdx);
+      }
+    };
+
+    const handleWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      targetZoomRef.current = Math.max(16, Math.min(64, targetZoomRef.current - e.deltaY * 0.025));
+    };
+
+    canvas.addEventListener("mousedown", handleMouseDown);
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+    canvas.addEventListener("wheel", handleWheel, { passive: false });
+
+    return () => {
+      cancelAnimationFrame(animId);
+      canvas.removeEventListener("mousedown", handleMouseDown);
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+      canvas.removeEventListener("wheel", handleWheel);
+    };
+  }, [
+    points,
+    centroids,
+    autoRotate,
+    rotationSpeed,
+    pointScale,
+    showGrid,
+    showHulls,
+    filterMode,
+    selectedIdx,
+    hoveredIdx,
+  ]);
+
+  return (
+    <div className="relative w-full h-full flex flex-col justify-between">
+      {/* Notice Banner */}
+      <div className="absolute top-14 left-4 right-4 bg-slate-900/90 backdrop-blur-md border border-amber-500/40 p-2.5 rounded text-xs flex items-center justify-between text-slate-200 z-10 shadow-lg">
+        <div className="flex items-center space-x-2">
+          <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
+          <span>
+            WebGL unavailable in current browser sandbox. Rendering with high-performance Canvas 2D Orthographic Engine. Drag to rotate, scroll to zoom.
+          </span>
+        </div>
+        <button
+          onClick={onRetry}
+          className="flex items-center space-x-1 px-2.5 py-1 rounded bg-amber-500/20 text-amber-300 border border-amber-500/50 hover:bg-amber-500/30 text-[11px] font-semibold transition-colors shrink-0 ml-3"
+        >
+          <RotateCw className="w-3 h-3" />
+          <span>Retry WebGL</span>
+        </button>
+      </div>
+
+      <canvas
+        ref={canvasRef}
+        width={960}
+        height={height}
+        className="w-full h-full cursor-grab active:cursor-grabbing block"
+      />
     </div>
   );
 };

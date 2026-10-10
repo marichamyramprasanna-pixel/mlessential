@@ -15,6 +15,7 @@ import {
   Bot,
   Settings as SettingsIcon,
   Box,
+  Lock,
 } from "lucide-react";
 import { DBSCANResults } from "../ml/dbscan";
 
@@ -28,6 +29,7 @@ export type ViewType =
   | "threat_intel"
   | "cloud_sessions"
   | "gemini_chat"
+  | "admin_security"
   | "settings"
   | "about"
   | "privacy_policy"
@@ -98,19 +100,25 @@ export const Sidebar: React.FC<SidebarProps> = ({
     },
     {
       id: "gemini_chat",
-      label: "9. Gemini Chatbot",
+      label: "9. AI Security Chatbot",
       icon: <Bot className="w-4 h-4" />,
-      badge: "Multi-Turn",
+      badge: "OpenRouter",
+    },
+    {
+      id: "admin_security",
+      label: "10. Admin Security",
+      icon: <Lock className="w-4 h-4" />,
+      badge: "Hardened",
     },
     {
       id: "settings",
-      label: "10. Settings",
+      label: "11. Settings",
       icon: <SettingsIcon className="w-4 h-4" />,
       badge: "Theme",
     },
-    { id: "about", label: "11. About DBSCAN", icon: <Info className="w-4 h-4" /> },
-    { id: "privacy_policy", label: "12. Privacy Policy", icon: <ShieldCheck className="w-4 h-4" /> },
-    { id: "terms", label: "13. Terms & Conditions", icon: <FileText className="w-4 h-4" /> },
+    { id: "about", label: "12. About DBSCAN", icon: <Info className="w-4 h-4" /> },
+    { id: "privacy_policy", label: "13. Privacy Policy", icon: <ShieldCheck className="w-4 h-4" /> },
+    { id: "terms", label: "14. Terms & Conditions", icon: <FileText className="w-4 h-4" /> },
   ];
 
   return (
@@ -127,12 +135,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <button
                 key={item.id}
                 onClick={() => onSelectView(item.id)}
-                className={`w-full flex items-center justify-between px-3 py-2 text-xs font-medium rounded transition-colors text-left ${
+                className={`relative w-full flex items-center justify-between px-3 py-2 text-xs font-medium rounded transition-all duration-150 ease-out active:scale-[0.985] text-left ${
                   isActive
-                    ? "bg-white dark:bg-slate-800 text-sky-600 dark:text-sky-400 border border-slate-300 dark:border-slate-700 shadow-sm"
+                    ? "bg-white dark:bg-slate-800 text-sky-600 dark:text-sky-400 border border-slate-300 dark:border-slate-700 shadow-xs pl-3.5"
                     : "text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-200/60 dark:hover:bg-slate-800/60 border border-transparent"
                 }`}
               >
+                {isActive && (
+                  <span className="absolute left-0 top-1.5 bottom-1.5 w-1 bg-sky-500 rounded-r-full" />
+                )}
                 <div className="flex items-center space-x-2.5 truncate">
                   <span className={isActive ? "text-sky-600 dark:text-sky-400" : "text-slate-500 dark:text-slate-400"}>
                     {item.icon}
@@ -141,7 +152,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 </div>
                 {item.badge && (
                   <span
-                    className={`ml-2 text-[10px] font-mono px-1.5 py-0.5 rounded border ${
+                    className={`ml-2 text-[10px] font-mono px-1.5 py-0.5 rounded border transition-colors ${
                       isActive
                         ? "bg-sky-100 dark:bg-sky-950 text-sky-700 dark:text-sky-300 border-sky-300 dark:border-sky-800"
                         : "bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-300 dark:border-slate-700"

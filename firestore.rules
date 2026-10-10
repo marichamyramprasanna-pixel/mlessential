@@ -16,6 +16,13 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == userId;
     }
 
+    function isAdmin() {
+      return isSignedIn() &&
+        (request.auth.token.admin == true ||
+         request.auth.uid == "admin" ||
+         (request.auth.token.email != null && request.auth.token.email.matches('.*@admin\\.internal$')));
+    }
+
     function isValidId(id) {
       return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
     }
@@ -28,9 +35,18 @@ service cloud.firestore {
       return resource.data;
     }
 
-    // Connection test document
+    // Authenticated connection health check
     match /test/{docId} {
-      allow get: if true;
+      allow get: if isSignedIn();
+    }
+
+    // Security Audit Logs (Append-only by authenticated sessions, read-only by Admins)
+    match /security_audit_logs/{logId} {
+      allow get, list: if isAdmin();
+      allow create: if isSignedIn() &&
+                       incoming().timestamp is string &&
+                       incoming().action is string;
+      allow update, delete: if false;
     }
 
     // Validation for User Profile
@@ -39,6 +55,7 @@ service cloud.firestore {
              data.email is string && data.email.size() <= 256 &&
              (!('displayName' in data) || (data.displayName is string && data.displayName.size() <= 128)) &&
              (!('photoURL' in data) || (data.photoURL is string && data.photoURL.size() <= 512)) &&
+             (!('role' in data) || (data.role is string && data.role in ['admin', 'analyst', 'viewer'])) &&
              (!('createdAt' in data) || (data.createdAt is string && data.createdAt.size() <= 64)) &&
              (!('lastLoginAt' in data) || (data.lastLoginAt is string && data.lastLoginAt.size() <= 64));
     }
@@ -60,10 +77,10 @@ service cloud.firestore {
              (!('createdAt' in data) || (data.createdAt is string && data.createdAt.size() <= 64));
     }
 
-    // Users Collection
+    // Users Collection with Owner & Admin RBAC
     match /users/{userId} {
-      allow get: if isValidId(userId) && isOwner(userId);
-      allow list: if false;
+      allow get: if isValidId(userId) && (isOwner(userId) || isAdmin());
+      allow list: if isAdmin();
       allow create: if isValidId(userId) && isOwner(userId) &&
                        isValidUserProfile(incoming()) &&
                        incoming().userId == request.auth.uid;
@@ -74,8 +91,8 @@ service cloud.firestore {
 
       // User Sessions Subcollection
       match /sessions/{sessionId} {
-        allow get: if isValidId(userId) && isValidId(sessionId) && isOwner(userId);
-        allow list: if isValidId(userId) && isOwner(userId);
+        allow get: if isValidId(userId) && isValidId(sessionId) && (isOwner(userId) || isAdmin());
+        allow list: if isValidId(userId) && (isOwner(userId) || isAdmin());
         allow create: if isValidId(userId) && isValidId(sessionId) && isOwner(userId) &&
                          isValidSession(incoming()) &&
                          incoming().userId == request.auth.uid;

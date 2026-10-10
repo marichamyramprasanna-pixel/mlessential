@@ -46,7 +46,7 @@ export const GeminiChatView: React.FC<GeminiChatViewProps> = ({
       content:
         "Welcome to the Network Anomaly Detection Assistant. How can I help you analyze flow telemetry, interpret DBSCAN density parameters, or evaluate detected traffic anomalies today?",
       timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-      model: "gemini-3.5-flash",
+      model: "openrouter/meta-llama/llama-3.3-70b-instruct",
       roleType: "analyst",
     },
   ]);
@@ -72,7 +72,7 @@ export const GeminiChatView: React.FC<GeminiChatViewProps> = ({
     analyst: {
       title: "Network Traffic Analyst",
       taskType: "general",
-      modelName: "gemini-3.5-flash",
+      modelName: "Llama 3.3 70B",
       badge: "General Tasks",
       desc: "Comprehensive density clustering analysis, noise point interpretation, and telemetry assessment.",
       icon: <Shield className="w-4 h-4 text-sky-400" />,
@@ -80,15 +80,15 @@ export const GeminiChatView: React.FC<GeminiChatViewProps> = ({
     telemetry_fast: {
       title: "Rapid Telemetry Assistant",
       taskType: "fast",
-      modelName: "gemini-3.1-flash-lite",
-      badge: "Fast Mode",
+      modelName: "Llama 3.1 8B",
+      badge: "High Speed",
       desc: "High-speed responses for metric definitions, packet formulas, and hyperparameter tuning.",
       icon: <Zap className="w-4 h-4 text-amber-400" />,
     },
     threat_complex: {
       title: "Deep Threat Modeler",
       taskType: "complex",
-      modelName: "gemini-3.1-pro-preview",
+      modelName: "Llama 3.3 70B",
       badge: "Complex Reasoning",
       desc: "Multi-stage attack graph reasoning, APT profiling, and strategic mitigation engineering.",
       icon: <Cpu className="w-4 h-4 text-emerald-400" />,
@@ -205,14 +205,14 @@ Selected Features: ${dataset.featureNames.join(", ")}`;
           <div className="flex items-center space-x-2">
             <Bot className="w-5 h-5 text-sky-600 dark:text-sky-400" />
             <h1 className="text-xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">
-              Gemini Security Chatbot
+              AI Security Chatbot
             </h1>
             <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-sky-700 dark:text-sky-300 border border-slate-300 dark:border-slate-700 uppercase font-medium">
-              Multi-Turn
+              OpenRouter
             </span>
           </div>
           <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">
-            Interactive multi-turn technical assistant with specialized role-based system instructions.
+            Interactive multi-turn technical assistant powered by OpenRouter LLMs with specialized role instructions.
           </p>
         </div>
 
@@ -352,35 +352,46 @@ Selected Features: ${dataset.featureNames.join(", ")}`;
         ))}
       </div>
 
-      {/* Message Input Box */}
-      <div className="border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/60 rounded p-2 flex items-center space-x-2 flex-shrink-0 shadow-xs">
-        <textarea
-          rows={1}
+      {/* Message Input Box wrapped in a Form for native Enter submission */}
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (inputText.trim() && !loading) {
+            handleSendMessage();
+          }
+        }}
+        className="border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/60 rounded p-2 flex items-center space-x-2 flex-shrink-0 shadow-xs"
+      >
+        <input
+          type="text"
           value={inputText}
           onChange={(e) => setInputText(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
+            if ((e.key === "Enter" || e.keyCode === 13) && !e.shiftKey) {
               e.preventDefault();
-              handleSendMessage();
+              if (inputText.trim() && !loading) {
+                handleSendMessage();
+              }
             }
           }}
-          placeholder={`Ask the ${currentRoleConfig.title} (${currentRoleConfig.modelName})...`}
-          className="flex-1 bg-transparent border-0 px-2 py-1 text-xs text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none resize-none font-sans"
+          placeholder={`Ask the ${currentRoleConfig.title} (${currentRoleConfig.modelName})... Press Enter to send`}
+          className="flex-1 bg-transparent border-0 px-2 py-1 text-xs text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none font-sans"
         />
 
         <button
-          onClick={() => handleSendMessage()}
+          type="submit"
           disabled={!inputText.trim() || loading}
           className={`px-3 py-1.5 rounded text-xs font-medium flex items-center space-x-1.5 transition-colors ${
             !inputText.trim() || loading
               ? "bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-500 cursor-not-allowed border border-slate-300 dark:border-slate-700"
               : "bg-sky-600 hover:bg-sky-500 text-white shadow-sm"
           }`}
+          title="Send command (Press Enter)"
         >
           <Send className="w-3.5 h-3.5" />
           <span>Send</span>
         </button>
-      </div>
+      </form>
     </div>
   );
 };
