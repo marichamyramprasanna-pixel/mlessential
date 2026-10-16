@@ -70,8 +70,8 @@ export const ThreatIntelligenceView: React.FC<ThreatIntelligenceViewProps> = ({
       setSearchQueries(data.searchQueries || []);
       setSources(data.sources || []);
     } catch (err: any) {
-      console.error("Threat search failed:", err);
-      setError(err.message || "An unexpected error occurred while querying live intelligence.");
+      console.warn("[ThreatIntelligenceView] Query note:", err?.message || err);
+      setError(err?.message || "An unexpected error occurred while querying live intelligence.");
     } finally {
       setLoading(false);
     }
@@ -86,11 +86,11 @@ export const ThreatIntelligenceView: React.FC<ThreatIntelligenceViewProps> = ({
             Threat Intelligence & Research
           </h1>
           <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-sky-100 dark:bg-sky-950 text-sky-700 dark:text-sky-300 border border-sky-300 dark:border-sky-800 uppercase font-medium">
-            Google Search Grounded
+            OpenRouter Intelligence
           </span>
         </div>
         <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">
-          Correlate detected anomalous traffic flows with real-world threat feeds, CVE disclosures, and MITRE ATT&CK techniques using live Google Search data.
+          Correlate detected anomalous traffic flows with real-world threat feeds, CVE disclosures, and MITRE ATT&CK techniques using live OpenRouter intelligence.
         </p>
       </div>
 

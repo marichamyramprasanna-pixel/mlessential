@@ -209,7 +209,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             }`}
           >
             <Bot className="w-3.5 h-3.5" />
-            <span>Gemini Chatbot</span>
+            <span>AI Security Chatbot</span>
           </button>
 
           <button
@@ -731,21 +731,21 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   {
                     id: "analyst" as BotRole,
                     label: "Network Traffic Analyst",
-                    model: "gemini-3.5-flash",
+                    model: "openrouter/llama-3.1-8b",
                     icon: <Shield className="w-4 h-4 text-sky-500" />,
                     desc: "General clustering interpretation & noise validation",
                   },
                   {
                     id: "telemetry_fast" as BotRole,
                     label: "Rapid Telemetry Assistant",
-                    model: "gemini-3.1-flash-lite",
+                    model: "openrouter/llama-3.2-3b",
                     icon: <Zap className="w-4 h-4 text-amber-500" />,
                     desc: "High-speed answers for metric formulas and tuning",
                   },
                   {
                     id: "threat_complex" as BotRole,
                     label: "Deep Threat Modeler",
-                    model: "gemini-3.1-pro-preview",
+                    model: "openrouter/llama-3.1-8b",
                     icon: <Cpu className="w-4 h-4 text-emerald-500" />,
                     desc: "Multi-stage attack graphs & MITRE ATT&CK mapping",
                   },

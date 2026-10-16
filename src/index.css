@@ -14,10 +14,13 @@
     text-rendering: optimizeLegibility;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    overscroll-behavior-y: none;
   }
 
   body {
     overflow-x: hidden;
+    -webkit-overflow-scrolling: touch;
+    transform: translateZ(0);
   }
 
   /* Smooth Custom Scrollbar */
@@ -31,7 +34,7 @@
   ::-webkit-scrollbar-thumb {
     background: rgba(148, 163, 184, 0.35);
     border-radius: 9999px;
-    transition: background-color 0.2s ease;
+    transition: background-color 0.2s cubic-bezier(0.16, 1, 0.3, 1);
   }
   ::-webkit-scrollbar-thumb:hover {
     background: rgba(148, 163, 184, 0.6);
@@ -43,9 +46,11 @@
     background: rgba(100, 116, 139, 0.75);
   }
 
-  /* Tactile Micro-Interactions */
+  /* Tactile Micro-Interactions & Hardware Acceleration */
   button {
     touch-action: manipulation;
+    backface-visibility: hidden;
+    -webkit-tap-highlight-color: transparent;
   }
 
   button:active:not(:disabled) {
@@ -53,21 +58,22 @@
   }
 }
 
-/* Fluid View & Element Fade-In Keyframe */
+/* Fluid View & Element Fade-In Keyframe with Cubic-Bezier Easing */
 @keyframes viewFadeIn {
-  from {
+  0% {
     opacity: 0;
-    transform: translateY(4px);
+    transform: translateY(3px);
   }
-  to {
+  100% {
     opacity: 1;
     transform: translateY(0);
   }
 }
 
 .animate-view-fade {
-  animation: viewFadeIn 0.22s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: viewFadeIn 0.18s cubic-bezier(0.16, 1, 0.3, 1) forwards;
   will-change: opacity, transform;
+  transform: translateZ(0);
 }
 
 /* Smooth Canvas & SVG Precision */
@@ -77,6 +83,7 @@ svg {
 
 canvas {
   image-rendering: auto;
+  transform: translateZ(0);
 }
 
 /* Accessible reduced motion support */
@@ -95,3 +102,4 @@ canvas {
     transform: none !important;
   }
 }
+

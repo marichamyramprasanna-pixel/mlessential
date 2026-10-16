@@ -46,7 +46,7 @@ export const GeminiChatView: React.FC<GeminiChatViewProps> = ({
       content:
         "Welcome to the Network Anomaly Detection Assistant. How can I help you analyze flow telemetry, interpret DBSCAN density parameters, or evaluate detected traffic anomalies today?",
       timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-      model: "openrouter/meta-llama/llama-3.3-70b-instruct",
+      model: "openrouter/meta-llama/llama-3.1-8b-instruct",
       roleType: "analyst",
     },
   ]);
@@ -72,24 +72,24 @@ export const GeminiChatView: React.FC<GeminiChatViewProps> = ({
     analyst: {
       title: "Network Traffic Analyst",
       taskType: "general",
-      modelName: "Llama 3.3 70B",
-      badge: "General Tasks",
+      modelName: "Llama 3.1 8B",
+      badge: "High Precision",
       desc: "Comprehensive density clustering analysis, noise point interpretation, and telemetry assessment.",
       icon: <Shield className="w-4 h-4 text-sky-400" />,
     },
     telemetry_fast: {
       title: "Rapid Telemetry Assistant",
       taskType: "fast",
-      modelName: "Llama 3.1 8B",
-      badge: "High Speed",
-      desc: "High-speed responses for metric definitions, packet formulas, and hyperparameter tuning.",
+      modelName: "Llama 3.2 3B",
+      badge: "Ultra-Fast",
+      desc: "Instant responses for metric definitions, packet formulas, and hyperparameter tuning.",
       icon: <Zap className="w-4 h-4 text-amber-400" />,
     },
     threat_complex: {
       title: "Deep Threat Modeler",
       taskType: "complex",
-      modelName: "Llama 3.3 70B",
-      badge: "Complex Reasoning",
+      modelName: "Llama 3.1 8B",
+      badge: "Threat Reasoning",
       desc: "Multi-stage attack graph reasoning, APT profiling, and strategic mitigation engineering.",
       icon: <Cpu className="w-4 h-4 text-emerald-400" />,
     },
@@ -158,8 +158,8 @@ Selected Features: ${dataset.featureNames.join(", ")}`;
 
       setMessages((prev) => [...prev, botMessage]);
     } catch (err: any) {
-      console.error("Chat failure:", err);
-      setError(err.message || "Failed to generate response.");
+      console.warn("[GeminiChatView] Query fallback:", err?.message || err);
+      setError(err?.message || "Failed to generate response.");
     } finally {
       setLoading(false);
     }

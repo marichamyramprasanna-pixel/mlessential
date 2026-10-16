@@ -274,12 +274,12 @@ export const SettingsView: React.FC = () => {
         </div>
       </div>
 
-      {/* 3. Gemini Chatbot Preferences */}
+      {/* 3. AI Security Chatbot Preferences */}
       <div className="bg-white dark:bg-slate-900/40 border border-slate-200 dark:border-slate-800 rounded p-5 space-y-4">
         <div className="flex items-center space-x-2 border-b border-slate-200 dark:border-slate-800 pb-2">
           <Bot className="w-4 h-4 text-sky-600 dark:text-sky-400" />
           <h2 className="text-xs font-semibold text-slate-900 dark:text-slate-200 uppercase tracking-wide">
-            Gemini Chatbot Configuration
+            AI Security Chatbot (OpenRouter)
           </h2>
         </div>
 
@@ -292,19 +292,19 @@ export const SettingsView: React.FC = () => {
               {
                 id: "analyst" as BotRole,
                 label: "Network Traffic Analyst",
-                model: "gemini-3.5-flash",
+                model: "openrouter/llama-3.1-8b",
                 icon: <Shield className="w-3.5 h-3.5 text-sky-500" />,
               },
               {
                 id: "telemetry_fast" as BotRole,
                 label: "Rapid Telemetry Assistant",
-                model: "gemini-3.1-flash-lite",
+                model: "openrouter/llama-3.2-3b",
                 icon: <Zap className="w-3.5 h-3.5 text-amber-500" />,
               },
               {
                 id: "threat_complex" as BotRole,
                 label: "Deep Threat Modeler",
-                model: "gemini-3.1-pro-preview",
+                model: "openrouter/llama-3.1-8b",
                 icon: <Cpu className="w-3.5 h-3.5 text-emerald-500" />,
               },
             ].map((role) => (

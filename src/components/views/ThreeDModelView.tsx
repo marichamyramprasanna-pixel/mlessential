@@ -221,7 +221,7 @@ export const ThreeDModelView: React.FC<ThreeDModelViewProps> = ({
         failIfMajorPerformanceCaveat: false,
       });
       renderer.setSize(width, height);
-      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.75));
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
       renderer.toneMapping = THREE.ACESFilmicToneMapping;
       renderer.toneMappingExposure = 1.15;
       rendererRef.current = renderer;
