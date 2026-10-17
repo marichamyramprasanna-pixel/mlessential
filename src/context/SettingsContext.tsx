@@ -14,6 +14,7 @@ export interface AppSettings {
   csvDelimiter: "," | ";";
   compactTableView: boolean;
   maxTableRows: number;
+  privacyModeEnabled: boolean;
 }
 
 const DEFAULT_SETTINGS: AppSettings = {
@@ -28,6 +29,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   csvDelimiter: ",",
   compactTableView: false,
   maxTableRows: 15,
+  privacyModeEnabled: false,
 };
 
 interface SettingsContextType {

@@ -13,8 +13,8 @@ import { TermsView } from "./components/views/TermsView";
 import { ThreatIntelligenceView } from "./components/views/ThreatIntelligenceView";
 import { CloudSessionsView } from "./components/views/CloudSessionsView";
 import { GeminiChatView } from "./components/views/GeminiChatView";
+import { UserManualView } from "./components/views/UserManualView";
 import { SettingsView } from "./components/views/SettingsView";
-import { AdminSecurityView } from "./components/views/AdminSecurityView";
 import { SettingsModal } from "./components/SettingsModal";
 import { SavedAnalysisSession } from "./firebase/sessions";
 
@@ -237,6 +237,7 @@ export default function App() {
         results={results}
         onReset={handleReset}
         onOpenSettings={() => setIsSettingsOpen(true)}
+        onOpenManual={() => setCurrentView("user_manual")}
       />
 
       {/* Main Workspace */}
@@ -361,7 +362,14 @@ export default function App() {
               />
             )}
 
-            {currentView === "admin_security" && <AdminSecurityView />}
+            {currentView === "user_manual" && (
+              <UserManualView
+                onNavigate={(v) => setCurrentView(v)}
+                onLoadSample={handleLoadSample}
+                hasDataset={rawRows.length > 0}
+                hasResults={results !== null}
+              />
+            )}
 
             {currentView === "settings" && <SettingsView />}
 

@@ -10,6 +10,7 @@ import {
   Sun,
   Moon,
   Settings as SettingsIcon,
+  BookOpen,
 } from "lucide-react";
 import { DBSCANResults } from "../ml/dbscan";
 import { useAuth } from "../context/AuthContext";
@@ -21,6 +22,7 @@ interface NavbarProps {
   results: DBSCANResults | null;
   onReset: () => void;
   onOpenSettings: () => void;
+  onOpenManual?: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -29,6 +31,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   results,
   onReset,
   onOpenSettings,
+  onOpenManual,
 }) => {
   const { user, signInWithGoogle, signOut, loading: authLoading } = useAuth();
   const { theme, toggleTheme } = useTheme();
@@ -112,6 +115,19 @@ export const Navbar: React.FC<NavbarProps> = ({
         >
           <SettingsIcon className="w-4 h-4 text-slate-600 dark:text-sky-400" />
         </button>
+
+        {/* User Manual Button */}
+        {onOpenManual && (
+          <button
+            onClick={onOpenManual}
+            className="flex items-center space-x-1 px-2 py-1 rounded text-xs text-slate-700 dark:text-slate-300 hover:text-sky-600 dark:hover:text-sky-400 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 border border-slate-300 dark:border-slate-700 transition-colors font-medium"
+            title="Open Application User Manual & Guide"
+            aria-label="User Manual"
+          >
+            <BookOpen className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400" />
+            <span className="hidden sm:inline">Manual</span>
+          </button>
+        )}
 
         {/* Firebase Authentication Button & Profile */}
         <div className="border-l border-slate-200 dark:border-slate-800 pl-2.5 flex items-center">

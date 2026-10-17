@@ -7,7 +7,12 @@ import {
   ArrowRight,
   Database,
   Hash,
+  Eye,
+  EyeOff,
+  Shield,
 } from "lucide-react";
+import { useSettings } from "../../context/SettingsContext";
+import { maskIpOrPii } from "../../utils/sanitizer";
 
 interface DatasetAnalysisViewProps {
   headers: string[];
@@ -30,6 +35,7 @@ export const DatasetAnalysisView: React.FC<DatasetAnalysisViewProps> = ({
   referenceColumn,
   onProceedToDetection,
 }) => {
+  const { settings, updateSettings } = useSettings();
   if (rawRows.length === 0 || headers.length === 0) {
     return (
       <div className="border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/40 rounded p-8 text-center max-w-xl mx-auto my-12 shadow-xs">
@@ -254,9 +260,32 @@ export const DatasetAnalysisView: React.FC<DatasetAnalysisViewProps> = ({
 
       {/* Dataset Preview Table */}
       <div className="border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/40 rounded p-4 shadow-xs">
-        <div className="flex items-center justify-between mb-3">
-          <div className="text-xs font-semibold text-slate-900 dark:text-slate-200 uppercase tracking-wide">
-            Dataset Preview (First 10 Rows)
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
+          <div className="flex items-center space-x-2">
+            <span className="text-xs font-semibold text-slate-900 dark:text-slate-200 uppercase tracking-wide">
+              Dataset Preview (First 10 Rows)
+            </span>
+            <button
+              onClick={() => updateSettings({ privacyModeEnabled: !settings.privacyModeEnabled })}
+              className={`inline-flex items-center space-x-1 px-2 py-0.5 rounded text-[10px] font-mono border transition-colors ${
+                settings.privacyModeEnabled
+                  ? "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border-emerald-300 dark:border-emerald-700 font-semibold"
+                  : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-300 dark:border-slate-700 hover:bg-slate-200 dark:hover:bg-slate-700"
+              }`}
+              title="Toggle IP and PII de-identification masking"
+            >
+              {settings.privacyModeEnabled ? (
+                <>
+                  <EyeOff className="w-3 h-3 text-emerald-500" />
+                  <span>IP/PII Mask Active</span>
+                </>
+              ) : (
+                <>
+                  <Eye className="w-3 h-3" />
+                  <span>Mask IP & PII</span>
+                </>
+              )}
+            </button>
           </div>
           <span className="text-[11px] font-mono text-slate-500 dark:text-slate-400">
             Showing 10 of {rawRows.length.toLocaleString()} rows
@@ -289,6 +318,7 @@ export const DatasetAnalysisView: React.FC<DatasetAnalysisViewProps> = ({
                   <td className="py-1.5 px-2.5 text-center text-slate-400 dark:text-slate-500">{rIdx + 1}</td>
                   {row.map((val, cIdx) => {
                     const isSelected = selectedFeatures.includes(headers[cIdx]);
+                    const displayVal = settings.privacyModeEnabled ? maskIpOrPii(String(val || "")) : val;
                     return (
                       <td
                         key={cIdx}
@@ -296,7 +326,7 @@ export const DatasetAnalysisView: React.FC<DatasetAnalysisViewProps> = ({
                           isSelected ? "text-slate-900 dark:text-slate-100 font-medium" : "text-slate-600 dark:text-slate-400"
                         }`}
                       >
-                        {val}
+                        {displayVal}
                       </td>
                     );
                   })}

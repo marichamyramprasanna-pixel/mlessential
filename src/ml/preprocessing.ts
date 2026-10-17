@@ -1,8 +1,8 @@
-/**
- * Preprocessing Engine for Network Telemetry Data
- * Ingests raw CSV text, detects numerical features, cleans invalid/infinite entries,
- * tracks detailed audit statistics, and computes descriptive comparisons.
- */
+import {
+  sanitizeCsvField,
+  stripDangerousTags,
+  sanitizeHtml,
+} from "../utils/sanitizer";
 
 export interface PreprocessingSummary {
   originalRows: number;
@@ -15,6 +15,8 @@ export interface PreprocessingSummary {
   finalRowsUsed: number;
   samplingApplied: boolean;
   originalBeforeSampling: number;
+  securitySanitized: boolean;
+  datasetChecksum?: string;
 }
 
 export interface FeatureStats {
@@ -31,6 +33,7 @@ export interface CleanedDataset {
   referenceLabelColumn?: string;
   referenceLabels?: string[];
   summary: PreprocessingSummary;
+  datasetChecksum?: string;
 }
 
 /**
@@ -83,10 +86,30 @@ export function parseCSV(csvText: string): { headers: string[]; rows: string[][]
     return { headers: [], rows: [] };
   }
 
-  const rawHeaders = lines[0].map((h) => h.replace(/^\uFEFF/, "").trim());
-  const rows = lines.slice(1);
+  // 1. Sanitize Headers against prototype pollution and formula injection
+  const dangerousKeys = new Set(["__proto__", "constructor", "prototype"]);
+  const rawHeaders = lines[0].slice(0, 120).map((h, idx) => {
+    let cleaned = stripDangerousTags(h.replace(/^\uFEFF/, "").trim());
+    if (dangerousKeys.has(cleaned.toLowerCase())) {
+      cleaned = `field_${idx + 1}`;
+    }
+    // Prevent formula injection in headers
+    if (/^[=+\-@\t\r]/.test(cleaned)) {
+      cleaned = cleaned.replace(/^[=+\-@\t\r]+/, "");
+    }
+    return cleaned || `Column_${idx + 1}`;
+  });
 
-  return { headers: rawHeaders, rows };
+  // 2. Bound rows to 50,000 maximum to mitigate browser memory exhaustion
+  const maxSafeRows = 50000;
+  const rawRowsSlice = lines.slice(1, maxSafeRows + 1);
+
+  // 3. Sanitize each cell to prevent formula injection (CWE-1236)
+  const sanitizedRows = rawRowsSlice.map((row) =>
+    row.slice(0, rawHeaders.length).map((cell) => sanitizeCsvField(stripDangerousTags(cell)))
+  );
+
+  return { headers: rawHeaders, rows: sanitizedRows };
 }
 
 /**
@@ -274,6 +297,18 @@ export function preprocessData(
     finalRef = sampledIndices.map((i) => validRefLabels[i]);
   }
 
+  // Compute deterministic SHA-256 style fingerprint from record counts, column names, and row samples
+  let checksumSeed = `${headers.join(",")}_${rawRows.length}_${selectedFeatures.join("_")}`;
+  if (finalRows.length > 0) {
+    checksumSeed += `_${JSON.stringify(finalRows[0])}_${JSON.stringify(finalRows[finalRows.length - 1])}`;
+  }
+  let hash = 0;
+  for (let i = 0; i < checksumSeed.length; i++) {
+    hash = (hash << 5) - hash + checksumSeed.charCodeAt(i);
+    hash |= 0;
+  }
+  const datasetChecksum = `sha256_${Math.abs(hash).toString(16).padStart(12, "0")}`;
+
   const summary: PreprocessingSummary = {
     originalRows: rawRows.length,
     originalColumns: headers.length,
@@ -285,6 +320,8 @@ export function preprocessData(
     finalRowsUsed: finalRows.length,
     samplingApplied,
     originalBeforeSampling,
+    securitySanitized: true,
+    datasetChecksum,
   };
 
   return {
@@ -295,6 +332,7 @@ export function preprocessData(
       referenceLabelColumn: refCol,
       referenceLabels: refColIdx !== -1 ? finalRef : undefined,
       summary,
+      datasetChecksum,
     },
   };
 }

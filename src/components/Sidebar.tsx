@@ -15,7 +15,7 @@ import {
   Bot,
   Settings as SettingsIcon,
   Box,
-  Lock,
+  BookOpen,
 } from "lucide-react";
 import { DBSCANResults } from "../ml/dbscan";
 
@@ -29,7 +29,7 @@ export type ViewType =
   | "threat_intel"
   | "cloud_sessions"
   | "gemini_chat"
-  | "admin_security"
+  | "user_manual"
   | "settings"
   | "about"
   | "privacy_policy"
@@ -105,10 +105,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
       badge: "OpenRouter",
     },
     {
-      id: "admin_security",
-      label: "10. Admin Security",
-      icon: <Lock className="w-4 h-4" />,
-      badge: "Hardened",
+      id: "user_manual",
+      label: "10. User Manual",
+      icon: <BookOpen className="w-4 h-4" />,
+      badge: "Guide",
     },
     {
       id: "settings",

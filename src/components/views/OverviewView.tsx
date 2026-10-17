@@ -10,6 +10,7 @@ import {
   FileSpreadsheet,
   AlertTriangle,
   Play,
+  BookOpen,
 } from "lucide-react";
 
 interface OverviewViewProps {
@@ -236,6 +237,34 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
             <span className="bg-slate-100 dark:bg-slate-950 px-2 py-1 rounded border border-slate-200 dark:border-slate-800">Packet Length Mean</span>
           </div>
         </div>
+      </div>
+
+      {/* User Manual & Operations Guide Callout */}
+      <div className="border border-sky-200 dark:border-sky-900/60 bg-sky-50/70 dark:bg-sky-950/20 rounded p-4 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="flex items-center space-x-3">
+          <div className="w-9 h-9 rounded bg-sky-100 dark:bg-sky-900/60 border border-sky-300 dark:border-sky-800 text-sky-600 dark:text-sky-400 flex items-center justify-center shrink-0">
+            <BookOpen className="w-4 h-4" />
+          </div>
+          <div>
+            <div className="text-xs font-semibold text-slate-900 dark:text-slate-100 flex items-center space-x-2">
+              <span>Application User Manual & Operations Guide</span>
+              <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-sky-100 dark:bg-sky-900 text-sky-700 dark:text-sky-300 border border-sky-300 dark:border-sky-800">
+                Docs & Calculator
+              </span>
+            </div>
+            <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">
+              Explore the 5-step workflow, interactive DBSCAN hyperparameter calculator, flow feature dictionary, and threat triage guidelines.
+            </p>
+          </div>
+        </div>
+
+        <button
+          onClick={() => onNavigate("user_manual")}
+          className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded text-xs font-medium bg-sky-600 hover:bg-sky-500 text-white shrink-0 shadow-xs transition-colors"
+        >
+          <span>Read User Manual</span>
+          <ArrowRight className="w-3.5 h-3.5" />
+        </button>
       </div>
 
       {/* Analytical Workflow */}
